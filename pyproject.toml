@@ -41,12 +41,9 @@ dependencies = [
     "pydantic-settings>=2.3",
     "rapidfuzz>=3.9",
     # Steam authentication, ownership, and redemption live in vendor-fabric's
-    # Steam connector rather than being reimplemented here.
-    #
-    # TEMPORARY: pinned to the branch that adds the Steam connector
-    # (jbcom/vendor-fabric#52). Switch to "vendor-fabric[steam]>=2.5" once that
-    # merges and release-please publishes it to PyPI.
-    "vendor-fabric[steam] @ git+https://github.com/jbcom/vendor-fabric@feat/steam-connector#subdirectory=packages/vendor-fabric",
+    # Steam connector rather than being reimplemented here. The connector was
+    # added in 2.5.0.
+    "vendor-fabric[steam]>=2.5",
 ]
 
 [project.optional-dependencies]
@@ -74,10 +71,6 @@ Issues = "https://github.com/jbcom/humble-steam-key-redeemer/issues"
 
 [tool.hatch.version]
 path = "src/humble_steam_key_redeemer/__init__.py"
-
-[tool.hatch.metadata]
-# Required while the vendor-fabric dependency is a direct git reference.
-allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/humble_steam_key_redeemer"]
