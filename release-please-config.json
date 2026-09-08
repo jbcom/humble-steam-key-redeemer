@@ -5,7 +5,7 @@
       "package-name": "humble-steam-key-redeemer",
       "release-type": "python",
       "changelog-path": "CHANGELOG.md",
-      "last-release-sha": "6a8308ff311a5bcb5b7851465ee22bab5afe23d6"
+      "release-as": "1.0.0"
     }
   },
   "changelog-sections": [
