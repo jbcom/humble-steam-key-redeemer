@@ -141,6 +141,9 @@ async function revealKey({ machineName, gamekey, keyIndex }) {
       }
     },
     [{ machineName, gamekey, keyIndex }],
+    // Same reasoning as redemption: one key Humble will not reveal is one
+    // key's problem, not grounds for abandoning the keys after it.
+    { throwOnError: false },
   );
 }
 

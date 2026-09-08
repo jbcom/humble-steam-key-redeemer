@@ -186,6 +186,21 @@ class TestFailuresThatNeverReachedSteam:
         assert result["finish"]["results"] == []
         assert [f["id"] for f in result["finish"]["failures"]] == [1]
 
+    def test_a_reveal_that_fails_in_transit_skips_only_that_key(self):
+        """It aborted the whole run, so keys already revealed were never tried."""
+        result = _redeem(
+            _plan(
+                {"id": 1, "reveal": {"machineName": "m", "gamekey": "g", "keyIndex": 0}},
+                {"id": 2, "key": "K2"},
+            ),
+            [_ok()],
+            reveal=True,
+            humble=[{"error": "Failed to fetch"}],
+        )
+
+        assert result["submitted"] == ["K2"]
+        assert [f["id"] for f in result["finish"]["failures"]] == [1]
+
     def test_a_refused_reveal_is_not_an_attempt(self):
         """Counting it would overstate the activation budget the run spent."""
         result = _redeem(
