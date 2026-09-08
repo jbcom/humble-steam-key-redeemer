@@ -1,0 +1,48 @@
+name: Automerge
+
+# Enables GitHub native auto-merge on release-please and grouped non-major
+# Dependabot pull requests. Major dependency updates remain subject to normal
+# review. Native auto-merge waits for required checks and then merge-commits
+# without further action. This workflow does not check out pull request code;
+# pull_request_target is used only to enable auto-merge from the base context.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  automerge:
+    name: Enable auto-merge
+    runs-on: ubuntu-latest
+    if: >
+      startsWith(github.event.pull_request.head.ref, 'release-please--') ||
+      github.event.pull_request.user.login == 'dependabot[bot]'
+    steps:
+      - id: classification
+        env:
+          IS_RELEASE_PLEASE: ${{ startsWith(github.event.pull_request.head.ref, 'release-please--') }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+
+          should_merge = os.environ["IS_RELEASE_PLEASE"] == "true"
+          if not should_merge:
+              title = os.environ.get("PR_TITLE", "")
+              # Only non-major dependency bumps merge unattended.
+              match = re.search(r"from (\d+)\.\S* to (\d+)\.", title)
+              should_merge = bool(match) and match.group(1) == match.group(2)
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"should_merge={'true' if should_merge else 'false'}\n")
+          PY
+      - if: steps.classification.outputs.should_merge == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: gh pr merge "$PR_NUMBER" --repo "$GH_REPO" --auto --merge
