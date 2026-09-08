@@ -10,6 +10,12 @@
                border-radius: 6px; background: #fff; cursor: pointer; }
       button:hover:not(:disabled) { background: #f4f4f4; }
       button:disabled { opacity: .5; cursor: default; }
+      button.danger { border-color: #d0a09b; color: #99201a; }
+      button.danger:hover:not(:disabled) { background: #fdf1f0; }
+      button.armed { background: #99201a; border-color: #99201a; color: #fff; font-weight: 600; }
+      button.armed:hover:not(:disabled) { background: #7d1a15; }
+      #reveal-row { display: block; font-size: 12px; color: #555; margin: -2px 0 12px; }
+      #reveal-row input { vertical-align: middle; margin: 0 4px 0 0; }
       #status { padding: 8px; border-radius: 6px; background: #f4f4f4; margin-bottom: 12px; }
       .ok { color: #14663a; } .bad { color: #99201a; }
       pre { white-space: pre-wrap; word-break: break-word; background: #f4f4f4; padding: 8px;
@@ -19,6 +25,11 @@
         p { color: #aaa; }
         button { background: #2a2a2a; border-color: #444; color: #eee; }
         button:hover:not(:disabled) { background: #333; }
+        button.danger { border-color: #6b3a36; color: #ff8f86; }
+        button.danger:hover:not(:disabled) { background: #3a2a29; }
+        button.armed { background: #99201a; border-color: #99201a; color: #fff; }
+        button.armed:hover:not(:disabled) { background: #b3251e; }
+        #reveal-row { color: #aaa; }
         #status, pre { background: #2a2a2a; }
         .ok { color: #6fd39b; } .bad { color: #ff8f86; }
       }
@@ -30,6 +41,11 @@
     <div id="status">Checking…</div>
     <button id="sync" disabled>Import library</button>
     <button id="dry-run" disabled>Preview redemptions</button>
+    <button id="redeem" class="danger" disabled>Redeem on Steam</button>
+    <label id="reveal-row" hidden>
+      <input type="checkbox" id="reveal" />
+      Reveal unrevealed keys — forfeits their gift links, permanently
+    </label>
     <pre id="output" hidden></pre>
     <script src="popup.js"></script>
   </body>

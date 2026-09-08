@@ -356,3 +356,32 @@ class TestInFlight:
         assert reply["failed_before_steam"] == 1
         assert store.all_keys()[0].state is KeyState.REVEALED
         assert len(store.pending_keys()) == 1
+
+
+class TestOutboundLimit:
+    def test_an_oversized_reply_is_reported(self):
+        """Chrome drops one silently, so the extension would never hear back."""
+        with pytest.raises(BridgeError, match="exceeds Chrome"):
+            write_message(io.BytesIO(), {"padding": "x" * (1024 * 1024 + 1)})
+
+    def test_uncertain_matches_are_capped(self, settings):
+        """A large library must still produce a plan that fits in a message."""
+        _seed(settings, *[_key(f"Game {i}", i) for i in range(1, 6)])
+
+        reply = handle_message({"command": "plan", "owned": {}}, settings)
+
+        assert len(reply["uncertain"]) <= 200
+        assert reply["uncertain_total"] >= len(reply["uncertain"])
+
+
+class TestRecordRequiresAVerdict:
+    def test_a_result_without_a_steam_response_is_refused(self, settings):
+        """Settling it as FAILED would drop the key on an answer Steam never gave."""
+        store = _seed(settings, _key("Celeste", 1))
+        key = store.all_keys()[0]
+
+        reply = handle_message({"command": "record", "result": {"id": key.id}}, settings)
+
+        assert reply["ok"] is False
+        assert store.all_keys()[0].state is KeyState.REVEALED
+        assert len(store.pending_keys()) == 1

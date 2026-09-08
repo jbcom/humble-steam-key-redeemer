@@ -33,6 +33,15 @@ _MAX_MESSAGE_BYTES = 64 * 1024 * 1024
 # Chrome frames each message with a 32-bit little-endian length prefix.
 _HEADER_BYTES = 4
 
+# Chrome refuses a host-to-extension message larger than 1 MB and drops it
+# without telling either side.
+_MAX_OUTBOUND_BYTES = 1024 * 1024
+
+# A large library can produce more uncertain matches than will fit in one
+# message. They are advisory — the attempts are what the browser acts on — so
+# the list is capped and the true count reported alongside it.
+_MAX_UNCERTAIN_REPORTED = 200
+
 
 class BridgeError(RuntimeError):
     """Raised when a native message cannot be read or handled."""
@@ -80,6 +89,10 @@ def write_message(stream: BinaryIO, message: dict[str, Any]) -> None:
         message: JSON-serializable reply.
     """
     payload = json.dumps(message).encode("utf-8")
+    if len(payload) > _MAX_OUTBOUND_BYTES:
+        # Chrome drops an oversized message silently, so the extension would
+        # simply never hear back. Say what happened instead.
+        raise BridgeError(f"Reply of {len(payload)} bytes exceeds Chrome's {_MAX_OUTBOUND_BYTES}-byte limit")
     stream.write(struct.pack("<I", len(payload)))
     stream.write(payload)
     stream.flush()
@@ -245,8 +258,10 @@ def _plan(message: dict[str, Any], settings: Settings) -> dict[str, Any]:
         "skipped": len(plan.skipped) + unrevealed,
         "unrevealed": unrevealed,
         "uncertain": [
-            {"title": entry.record.human_name, "matched": entry.decision.app_name} for entry in plan.uncertain
+            {"title": entry.record.human_name, "matched": entry.decision.app_name}
+            for entry in plan.uncertain[:_MAX_UNCERTAIN_REPORTED]
         ],
+        "uncertain_total": len(plan.uncertain),
     }
 
 
@@ -308,7 +323,12 @@ def _record(message: dict[str, Any], settings: Settings) -> dict[str, Any]:
         raise BridgeError("Result carried no key id")
 
     raw_body = result.get("result")
-    body: dict[str, Any] = raw_body if isinstance(raw_body, dict) else {}
+    if not isinstance(raw_body, dict):
+        # No verdict from Steam means no verdict to record. Settling the key
+        # as FAILED here would remove it from every future plan on the
+        # strength of an answer Steam never gave.
+        raise BridgeError("Result carried no Steam response")
+    body: dict[str, Any] = raw_body
     succeeded = body.get("success") == 1
 
     raw_code = body.get("purchase_result_details")

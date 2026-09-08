@@ -1,6 +1,23 @@
 const statusEl = document.getElementById("status");
 const outputEl = document.getElementById("output");
-const buttons = [document.getElementById("sync"), document.getElementById("dry-run")];
+const redeemButton = document.getElementById("redeem");
+const revealBox = document.getElementById("reveal");
+const buttons = [
+  document.getElementById("sync"),
+  document.getElementById("dry-run"),
+  redeemButton,
+];
+
+// Redeeming is irreversible and spends a limited hourly budget, so the button
+// arms on the first click and acts on the second. A modal would block every
+// later message the extension tries to handle, so it is not an option here.
+let armed = false;
+
+function disarm() {
+  armed = false;
+  redeemButton.textContent = "Redeem on Steam";
+  redeemButton.classList.remove("armed");
+}
 
 function show(text, cls) {
   statusEl.textContent = text;
@@ -35,12 +52,12 @@ function report(reply) {
   outputEl.textContent = typeof reply === "string" ? reply : JSON.stringify(reply, null, 2);
 }
 
-async function send(action) {
+async function send(action, extra = {}) {
   buttons.forEach((button) => (button.disabled = true));
   show("Working…");
 
   try {
-    const response = await chrome.runtime.sendMessage({ action });
+    const response = await chrome.runtime.sendMessage({ action, ...extra });
     if (response?.ok && response.reply?.ok !== false) {
       show("Done.", "ok");
       report(response.reply);
@@ -54,6 +71,7 @@ async function send(action) {
   } finally {
     // Always, or a failure leaves the popup stuck on "Working…" for good.
     buttons.forEach((button) => (button.disabled = false));
+    disarm();
   }
 }
 
@@ -68,6 +86,9 @@ async function send(action) {
   if (humble && steam) {
     show("Signed in to Humble and Steam.", "ok");
     buttons.forEach((button) => (button.disabled = false));
+    // Revealing goes through Humble, so the choice only appears once both
+    // sites are reachable.
+    document.getElementById("reveal-row").hidden = false;
     return;
   }
 
@@ -79,3 +100,20 @@ async function send(action) {
 
 document.getElementById("sync").addEventListener("click", () => send("sync"));
 document.getElementById("dry-run").addEventListener("click", () => send("preview"));
+
+redeemButton.addEventListener("click", () => {
+  if (!armed) {
+    armed = true;
+    redeemButton.textContent = revealBox.checked
+      ? "Click again to redeem and reveal"
+      : "Click again to redeem";
+    redeemButton.classList.add("armed");
+    show("This cannot be undone. Click again to go ahead.", "bad");
+    return;
+  }
+  send("redeem", { reveal: revealBox.checked });
+});
+
+// Changing what the run would do disarms it, so a click cannot carry over
+// from the choice that preceded it.
+revealBox.addEventListener("change", disarm);

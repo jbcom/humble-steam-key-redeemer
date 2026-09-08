@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self
@@ -127,7 +128,17 @@ class HumbleBrowser:
         # apply, rather than creating an isolated one.
         self._context = self._browser.contexts[0] if self._browser.contexts else self._browser.new_context()
         self._context.set_default_timeout(self._settings.browser_timeout_ms)
-        self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
+
+        # Take a Humble tab if one is open, and otherwise open a new one.
+        # Grabbing whatever happens to be first would navigate away from
+        # whatever the person was doing in it.
+        self._page = (
+            next(
+                (page for page in self._context.pages if "humblebundle.com" in page.url),
+                None,
+            )
+            or self._context.new_page()
+        )
 
     @property
     def is_attached(self) -> bool:
@@ -149,6 +160,12 @@ class HumbleBrowser:
     def save_session(self) -> Path:
         """Persist the browser session for reuse.
 
+        Only Humble's own cookies are kept. Attaching to an everyday browser
+        means the context holds bearer credentials for every site signed in
+        there, and writing those to disk — then loading them into a browser
+        this tool launches — would spread them well beyond what redeeming
+        keys needs.
+
         Session cookies are bearer credentials, so the file is written with
         owner-only permissions.
 
@@ -156,7 +173,20 @@ class HumbleBrowser:
             The path written.
         """
         path = self._settings.humble_session_path
-        self._require_context().storage_state(path=str(path))
+        state = self._require_context().storage_state()
+
+        state["cookies"] = [
+            cookie for cookie in state.get("cookies", []) if "humblebundle.com" in cookie.get("domain", "")
+        ]
+        state["origins"] = [
+            origin for origin in state.get("origins", []) if "humblebundle.com" in origin.get("origin", "")
+        ]
+
+        # Written through a private descriptor rather than written and then
+        # chmod-ed, so the credentials are never briefly world-readable.
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(state, handle)
         path.chmod(0o600)
         return path
 
