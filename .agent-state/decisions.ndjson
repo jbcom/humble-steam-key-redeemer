@@ -4,3 +4,4 @@
 {"ts":"2026-09-08T12:34:54.249Z","sha":"b314b959014e4c80d7e88116449cf1bab04e17a1","subject":"Merge pull request #4 from jbcom/ci/deploy-docs","decision":null,"why":null,"resolves":[],"overrides":[],"source":"gh-pr-merge"}
 {"ts":"2026-09-08T12:45:56.765Z","sha":"7dd797567713ffa64a1371c32ab3b600bf1bda41","subject":"Merge pull request #5 from jbcom/ci/release-and-publish","decision":null,"why":null,"resolves":[],"overrides":[],"source":"gh-pr-merge"}
 {"ts":"2026-09-08T12:52:41.590Z","sha":"6a8308ff311a5bcb5b7851465ee22bab5afe23d6","subject":"Merge pull request #7 from jbcom/fix/release-version","decision":null,"why":null,"resolves":[],"overrides":[],"source":"gh-pr-merge"}
+{"ts":"2026-09-08T12:56:12.966Z","sha":"3e7f4c6113aee545c3975da5db5ebab5fac0df13","subject":"Merge pull request #10 from jbcom/fix/release-baseline","decision":null,"why":null,"resolves":[],"overrides":[],"source":"gh-pr-merge"}
