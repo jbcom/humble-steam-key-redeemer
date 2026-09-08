@@ -81,6 +81,28 @@ same work with a person driving it, and it reports the same summaries.
 Redeeming arms on the first click and runs on the second, because it cannot be
 undone.
 
+## The same protections as the command line
+
+This path is not the lenient one. It applies exactly what [`hskr redeem`](usage.md)
+does, because both ask the same code:
+
+- **Games you already own are skipped**, so an activation is not spent on a
+  duplicate — which Steam counts as one of the ten failures it allows an hour.
+- **Gift links and placeholder text never reach Steam.** They live in the same
+  field as real keys, and sending one spends a failure for nothing.
+- **A key is marked in flight before Steam sees it.** If Chrome closes or the
+  service worker is terminated mid-activation, the key is left `attempted`
+  rather than pending, so a later run does not offer it up a second time —
+  Steam may well have accepted it. `hskr status` lists these.
+- **A rate limit ends the run** instead of deepening the cooldown, and keys
+  that were only rate-limited stay eligible for the next one.
+- **A failure that never reached Steam is not a verdict.** A missing session, a
+  request that did not complete, a reveal Humble refused — none of those settle
+  a key, and none are counted as activations spent.
+- **Nothing is revealed unless you ask.** Revealing forfeits a key's gift link
+  permanently, so `--reveal` is required and applies only to keys about to be
+  redeemed.
+
 ## How a command reaches the browser
 
 Chrome starts a native host itself and owns both ends of its pipes, so a
