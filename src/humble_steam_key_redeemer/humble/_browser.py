@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self
+from urllib.parse import urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
@@ -29,9 +31,40 @@ if TYPE_CHECKING:
     from humble_steam_key_redeemer.settings import Settings
 
 
+HUMBLE_DOMAIN = "humblebundle.com"
+
 HUMBLE_LOGIN_PAGE = "https://www.humblebundle.com/login"
 HUMBLE_LIBRARY_PAGE = "https://www.humblebundle.com/home/library"
 HUMBLE_SUBSCRIPTION_PAGE = "https://www.humblebundle.com/subscription/"
+
+
+def _is_humble_host(host: str) -> bool:
+    """Whether a hostname is Humble's own.
+
+    Checked as a host rather than as a substring: `humblebundle.com` appears
+    inside `humblebundle.com.example.net` too, and treating that as Humble
+    would copy an unrelated site's cookies into the session file.
+
+    Args:
+        host: A hostname, optionally with a leading dot as cookies use.
+
+    Returns:
+        Whether the host is `humblebundle.com` or a subdomain of it.
+    """
+    host = host.lstrip(".").lower()
+    return host == HUMBLE_DOMAIN or host.endswith(f".{HUMBLE_DOMAIN}")
+
+
+def _is_humble_url(url: str) -> bool:
+    """Whether a URL points at Humble.
+
+    Args:
+        url: The URL to test.
+
+    Returns:
+        Whether its host is Humble's.
+    """
+    return _is_humble_host(urlparse(url).hostname or "")
 
 
 class HumbleBrowserError(RuntimeError):
@@ -55,25 +88,30 @@ class HumbleBrowser:
     # ------------------------------------------------------------ lifecycle
 
     def start(self) -> Self:
-        """Launch the browser, restoring a saved session when present.
+        """Start the browser session, restoring a saved session when present.
+
+        When ``cdp_endpoint`` is configured, attaches to that already-running
+        browser instead of launching a new one. That lets the tool reuse a
+        browser a person is already signed into — including one an agent is
+        driving — rather than requiring a separate sign-in in an isolated
+        profile.
 
         Returns:
             This browser session.
 
         Raises:
-            HumbleBrowserError: If the browser cannot be launched.
+            HumbleBrowserError: If the browser cannot be started or reached.
         """
         self._settings.ensure_state_dir()
         try:
             self._playwright = sync_playwright().start()
-            launcher = getattr(self._playwright, self._settings.browser)
-            self._browser = launcher.launch(headless=self._settings.headless)
-            self._context = self._browser.new_context(
-                storage_state=self._storage_state(),
-                locale=self._settings.locale,
-            )
-            self._context.set_default_timeout(self._settings.browser_timeout_ms)
-            self._page = self._context.new_page()
+            if self._settings.cdp_endpoint:
+                self._start_over_cdp()
+            else:
+                self._start_launched()
+        except HumbleBrowserError:
+            self.close()
+            raise
         except Exception as exc:
             self.close()
             raise HumbleBrowserError(
@@ -82,6 +120,62 @@ class HumbleBrowser:
                 "    playwright install chromium"
             ) from exc
         return self
+
+    def _start_launched(self) -> None:
+        """Launch a browser Playwright manages itself."""
+        if self._playwright is None:  # pragma: no cover - start() sets this
+            raise HumbleBrowserError("Playwright is not running")
+        launcher = getattr(self._playwright, self._settings.browser)
+        self._browser = launcher.launch(headless=self._settings.headless)
+        self._context = self._browser.new_context(
+            storage_state=self._storage_state(),
+            locale=self._settings.locale,
+        )
+        self._context.set_default_timeout(self._settings.browser_timeout_ms)
+        self._page = self._context.new_page()
+
+    def _start_over_cdp(self) -> None:
+        """Attach to a browser already running with remote debugging enabled.
+
+        The existing browser owns its profile and cookies, so no saved session
+        is injected: whatever it is signed into is what the tool sees.
+
+        Raises:
+            HumbleBrowserError: If the endpoint cannot be reached.
+        """
+        if self._playwright is None:  # pragma: no cover - start() sets this
+            raise HumbleBrowserError("Playwright is not running")
+        endpoint = self._settings.cdp_endpoint or ""
+        try:
+            self._browser = self._playwright.chromium.connect_over_cdp(endpoint)
+        except Exception as exc:
+            raise HumbleBrowserError(
+                f"Could not attach to a browser at {endpoint}: {exc}\n"
+                "Start one with remote debugging enabled, for example:\n"
+                "    /Applications/Google Chrome.app/Contents/MacOS/Google Chrome \\\n"
+                "      --remote-debugging-port=9222 --user-data-dir=/tmp/hskr-chrome"
+            ) from exc
+
+        # An attached browser already has a context; reuse it so its cookies
+        # apply, rather than creating an isolated one.
+        self._context = self._browser.contexts[0] if self._browser.contexts else self._browser.new_context()
+        self._context.set_default_timeout(self._settings.browser_timeout_ms)
+
+        # Take a Humble tab if one is open, and otherwise open a new one.
+        # Grabbing whatever happens to be first would navigate away from
+        # whatever the person was doing in it.
+        self._page = (
+            next(
+                (page for page in self._context.pages if _is_humble_url(page.url)),
+                None,
+            )
+            or self._context.new_page()
+        )
+
+    @property
+    def is_attached(self) -> bool:
+        """Whether this session attached to an existing browser."""
+        return bool(self._settings.cdp_endpoint)
 
     def _storage_state(self) -> str | None:
         """Return the saved session path, when one exists and is usable."""
@@ -98,6 +192,12 @@ class HumbleBrowser:
     def save_session(self) -> Path:
         """Persist the browser session for reuse.
 
+        Only Humble's own cookies are kept. Attaching to an everyday browser
+        means the context holds bearer credentials for every site signed in
+        there, and writing those to disk — then loading them into a browser
+        this tool launches — would spread them well beyond what redeeming
+        keys needs.
+
         Session cookies are bearer credentials, so the file is written with
         owner-only permissions.
 
@@ -105,7 +205,20 @@ class HumbleBrowser:
             The path written.
         """
         path = self._settings.humble_session_path
-        self._require_context().storage_state(path=str(path))
+        state = self._require_context().storage_state()
+
+        state["cookies"] = [
+            cookie for cookie in state.get("cookies", []) if _is_humble_host(cookie.get("domain", ""))
+        ]
+        state["origins"] = [
+            origin for origin in state.get("origins", []) if _is_humble_url(origin.get("origin", ""))
+        ]
+
+        # Written through a private descriptor rather than written and then
+        # chmod-ed, so the credentials are never briefly world-readable.
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(state, handle)
         path.chmod(0o600)
         return path
 
@@ -120,7 +233,9 @@ class HumbleBrowser:
         if self._context is not None:
             with contextlib.suppress(Exception):
                 self._context.close()
-        if self._browser is not None:
+        # Only close a browser this session launched. Closing one we merely
+        # attached to would shut down the user's own browser.
+        if self._browser is not None and not self._settings.cdp_endpoint:
             with contextlib.suppress(Exception):
                 self._browser.close()
         if self._playwright is not None:

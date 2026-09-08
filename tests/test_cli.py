@@ -272,3 +272,109 @@ class TestRevealRequiresHumbleSession:
         result = runner.invoke(app, ["redeem", "--state-dir", str(state_dir), "--yes", "--reveal"])
 
         assert result.exit_code == 1
+
+
+class TestBrowserCommand:
+    """`hskr browser` is the agent-facing path, so its output is the whole UI."""
+
+    def test_an_unknown_action_is_refused(self, state_dir):
+        result = runner.invoke(app, ["browser", "wipe-everything", "--state-dir", str(state_dir)])
+
+        assert result.exit_code == 1
+        assert "Unknown browser action" in result.output
+
+    def test_a_silent_browser_says_what_to_check(self, state_dir):
+        """The common cause is a stale extension id, so the error names it."""
+        result = runner.invoke(app, ["browser", "status", "--state-dir", str(state_dir), "--timeout", "1"])
+
+        assert result.exit_code == 1
+        assert "did not respond" in result.output
+        assert "extension-id" in result.output
+
+    def test_a_reported_failure_exits_nonzero(self, state_dir, monkeypatch):
+        """An agent has to be able to tell a failed run from a finished one."""
+        monkeypatch.setattr(
+            "humble_steam_key_redeemer.cli._app.run_command",
+            lambda *a, **k: {"ok": False, "error": "Not signed in to Steam."},
+        )
+        result = runner.invoke(app, ["browser", "redeem", "--state-dir", str(state_dir)])
+
+        assert result.exit_code == 1
+        assert "Not signed in to Steam." in result.output
+
+
+class TestBrowserOutput:
+    """Every count the bridge reports has to reach the person reading it."""
+
+    def _render(self, state_dir, monkeypatch, reply: dict) -> str:
+        monkeypatch.setattr(
+            "humble_steam_key_redeemer.cli._app.run_command",
+            lambda *a, **k: {"ok": True, "reply": reply},
+        )
+        result = runner.invoke(app, ["browser", "preview", "--state-dir", str(state_dir)])
+        assert result.exit_code == 0
+        return result.output
+
+    def test_unrevealed_keys_are_explained(self, state_dir, monkeypatch):
+        """Otherwise a library of them reports 0 to attempt and no reason."""
+        output = self._render(state_dir, monkeypatch, {"attempts": [], "skipped": 12, "unrevealed": 12})
+
+        assert "0" in output
+        assert "unrevealed" in output
+        assert "--reveal" in output
+
+    def test_capped_uncertain_matches_say_how_many_were_left_out(self, state_dir, monkeypatch):
+        output = self._render(
+            state_dir,
+            monkeypatch,
+            {
+                "attempts": [{"title": "Celeste"}],
+                "skipped": 0,
+                "uncertain": [{"title": "A", "matched": "B"}],
+                "uncertain_total": 30,
+            },
+        )
+
+        assert "29 more" in output
+
+    def test_failures_before_steam_are_not_counted_as_attempts(self, state_dir, monkeypatch):
+        """They spent no activation, so folding them in would mislead."""
+        output = self._render(
+            state_dir,
+            monkeypatch,
+            {"attempted": 3, "redeemed": 3, "failed_before_steam": 2, "pending": 5},
+        )
+
+        assert "3 redeemed" in output
+        assert "never reached Steam" in output
+
+
+class TestBrowserSummaries:
+    """Each reply shape the bridge sends has to render as something readable."""
+
+    def _render(self, state_dir, monkeypatch, reply: dict, action: str = "sync") -> str:
+        monkeypatch.setattr(
+            "humble_steam_key_redeemer.cli._app.run_command",
+            lambda *a, **k: {"ok": True, "reply": reply},
+        )
+        result = runner.invoke(app, ["browser", action, "--state-dir", str(state_dir)])
+        assert result.exit_code == 0
+        return result.output
+
+    def test_an_import_reports_what_it_found(self, state_dir, monkeypatch):
+        output = self._render(
+            state_dir,
+            monkeypatch,
+            {"orders": 47, "keys": 310, "steam_keys": 288, "revealed": 12},
+        )
+
+        assert "310" in output
+        assert "47" in output
+        assert "288" in output
+
+    def test_an_unfamiliar_shape_still_prints_rather_than_vanishing(self, state_dir, monkeypatch):
+        """A reply this does not recognise must not render as nothing."""
+        output = self._render(state_dir, monkeypatch, {"humble": True, "steam": False}, "status")
+
+        assert "humble" in output
+        assert "steam" in output

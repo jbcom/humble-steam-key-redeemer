@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
@@ -11,6 +12,13 @@ from rich.console import Console
 from rich.table import Table
 
 from humble_steam_key_redeemer import __version__
+from humble_steam_key_redeemer.bridge import (
+    BROWSER_ACTIONS,
+    BridgeError,
+    install_manifest,
+    run_command,
+    run_host,
+)
 from humble_steam_key_redeemer.core import KeyRecord, RedeemerStore, RedemptionEngine
 from humble_steam_key_redeemer.humble import (
     HUMBLE_LOGIN_PAGE,
@@ -32,6 +40,9 @@ app = typer.Typer(
 console = Console()
 error_console = Console(stderr=True)
 
+# How often to re-check whether a browser sign-in has completed.
+_LOGIN_POLL_SECONDS = 3
+
 
 def _version(value: bool) -> None:
     """Print the version and exit."""
@@ -50,13 +61,41 @@ def _main(
     """Redeem Humble Bundle keys on Steam."""
 
 
-def _settings(state_dir: Path | None, headless: bool | None) -> Settings:
+def _await_login(client: HumbleClient, timeout: int = 600) -> bool:
+    """Wait until the Humble session is valid.
+
+    Polling rather than prompting means this works with no terminal attached.
+
+    Args:
+        client: Client whose session is checked.
+        timeout: Seconds to wait; ``0`` waits indefinitely.
+
+    Returns:
+        ``True`` once signed in, ``False`` on timeout.
+    """
+    deadline = time.monotonic() + timeout if timeout else None
+    while True:
+        # Quietly: navigating would replace the form being filled in.
+        if client.is_logged_in_quietly():
+            return True
+        if deadline is not None and time.monotonic() > deadline:
+            return False
+        time.sleep(_LOGIN_POLL_SECONDS)
+
+
+def _settings(
+    state_dir: Path | None,
+    headless: bool | None,
+    cdp_endpoint: str | None = None,
+) -> Settings:
     """Build settings with CLI overrides applied."""
     overrides: dict[str, object] = {}
     if state_dir is not None:
         overrides["state_dir"] = state_dir
     if headless is not None:
         overrides["headless"] = headless
+    if cdp_endpoint is not None:
+        overrides["cdp_endpoint"] = cdp_endpoint
     settings = Settings(**overrides)  # type: ignore[arg-type]
     settings.ensure_state_dir()
     return settings
@@ -99,8 +138,7 @@ def sync(
                     raise typer.Exit(1)
                 console.print(f"Sign in to Humble in the browser window: {HUMBLE_LOGIN_PAGE}")
                 browser.goto(HUMBLE_LOGIN_PAGE)
-                typer.confirm("Press Enter once you are signed in", default=True, abort=False)
-                if not client.is_logged_in():
+                if not _await_login(client):
                     error_console.print("[red]Still not signed in.[/red]")
                     raise typer.Exit(1)
 
@@ -124,18 +162,44 @@ def sync(
 @app.command()
 def login(
     state_dir: StateDirOption = None,
+    timeout: Annotated[
+        int, typer.Option("--timeout", min=0, help="Seconds to wait for sign-in (0 waits forever).")
+    ] = 600,
+    cdp: Annotated[
+        str | None,
+        typer.Option("--cdp", help="Attach to a browser already running at this CDP endpoint."),
+    ] = None,
 ) -> None:
-    """Sign in to Humble in a visible browser window and save the session."""
-    settings = _settings(state_dir, headless=False)
+    """Sign in to Humble in a browser window and save the session.
+
+    The command polls until the session is valid rather than waiting on a
+    keypress, so it works unattended — under an agent, in a script, or with no
+    terminal attached — as well as interactively.
+    """
+    settings = _settings(state_dir, headless=False, cdp_endpoint=cdp)
     try:
         with HumbleBrowser(settings) as browser:
             client = HumbleClient(browser, int(settings.request_timeout * 1000))
             browser.goto(HUMBLE_LOGIN_PAGE)
+
+            if client.is_logged_in():
+                path = browser.save_session()
+                console.print(f"Already signed in. Session saved to [bold]{path}[/bold].")
+                return
+
             console.print("Complete the Humble sign-in in the browser window.")
-            typer.confirm("Press Enter once you are signed in", default=True, abort=False)
-            if not client.is_logged_in():
-                error_console.print("[red]Sign-in was not completed.[/red]")
-                raise typer.Exit(1)
+            console.print("[dim]Waiting for sign-in; no keypress needed.[/dim]")
+
+            deadline = time.monotonic() + timeout if timeout else None
+            with console.status("Waiting for Humble sign-in..."):
+                while True:
+                    if client.is_logged_in_quietly():
+                        break
+                    if deadline is not None and time.monotonic() > deadline:
+                        error_console.print(f"[red]Sign-in was not completed within {timeout}s.[/red]")
+                        raise typer.Exit(1)
+                    time.sleep(_LOGIN_POLL_SECONDS)
+
             path = browser.save_session()
     except HumbleBrowserError as exc:
         error_console.print(f"[red]{exc}[/red]")
@@ -347,6 +411,177 @@ def export(
     store = RedeemerStore(settings.database_path)
     path = store.export_csv(destination, steam_only=steam_only)
     console.print(f"Exported to [bold]{path}[/bold].")
+
+
+def _extension_directory() -> Path:
+    """Locate the extension, installed or in a checkout.
+
+    An installed copy ships inside the package; a checkout has it at the
+    repository root. Pointing someone at a path that does not exist is worse
+    than saying it is missing, so both are tried.
+
+    Returns:
+        The directory holding the extension.
+
+    Raises:
+        typer.Exit: If neither location has it.
+    """
+    packaged = Path(__file__).resolve().parents[1] / "extension"
+    if (packaged / "manifest.json").is_file():
+        return packaged
+
+    checkout = Path(__file__).resolve().parents[3] / "extension"
+    if (checkout / "manifest.json").is_file():
+        return checkout
+
+    error_console.print(
+        "[red]The extension is missing from this installation.[/red] "
+        "Install from PyPI, or run from a checkout of the repository."
+    )
+    raise typer.Exit(1)
+
+
+@app.command()
+def bridge(
+    extension_id: Annotated[
+        str | None,
+        typer.Option("--extension-id", help="Chrome extension id to authorize."),
+    ] = None,
+    serve: Annotated[
+        bool, typer.Option("--serve", hidden=True, help="Run as the native messaging host.")
+    ] = False,
+    state_dir: StateDirOption = None,
+) -> None:
+    """Set up the Chrome extension bridge, or serve it.
+
+    Without arguments this prints the steps to install the extension. With
+    `--extension-id` it registers the native messaging host so Chrome will let
+    that extension talk to this tool.
+    """
+    if serve:
+        # Honour --state-dir here too. The launcher exports HSKR_STATE_DIR, so
+        # the host Chrome starts already reads the right directory, but a host
+        # started by hand with the flag must not silently use another one.
+        run_host(settings=_settings(state_dir, headless=None))
+        return
+
+    settings = _settings(state_dir, headless=None)
+    settings.ensure_state_dir()
+    source = _extension_directory()
+
+    if extension_id is None:
+        console.print("[bold]Install the Chrome extension[/bold]\n")
+        console.print("1. Open [bold]chrome://extensions[/bold]")
+        console.print("2. Turn on [bold]Developer mode[/bold] (top right)")
+        console.print("3. Click [bold]Load unpacked[/bold] and choose:")
+        console.print(f"   [bold]{source}[/bold]")
+        console.print("4. Copy the extension's ID from its card, then run:\n")
+        console.print("   [bold]hskr bridge --extension-id <ID>[/bold]\n")
+        console.print(
+            "[dim]Chrome only starts a native host that names the calling extension, "
+            "so the ID has to be registered before the extension can reach this tool.[/dim]"
+        )
+        return
+
+    manifest = install_manifest(extension_id, settings=settings)
+    console.print(f"Registered native messaging host at [bold]{manifest}[/bold].")
+    console.print("Reload the extension in chrome://extensions, then either:\n")
+    console.print("  [bold]hskr browser sync[/bold]   drive it from here, no clicking")
+    console.print("  the toolbar button      the same work, with a person driving it")
+
+
+@app.command()
+def browser(
+    action: Annotated[
+        str,
+        typer.Argument(help=f"What the browser should do: {', '.join(BROWSER_ACTIONS)}."),
+    ],
+    state_dir: StateDirOption = None,
+    reveal: Annotated[
+        bool,
+        typer.Option(
+            "--reveal/--no-reveal",
+            help="Reveal unrevealed Humble keys. This forfeits gift links and cannot be undone.",
+        ),
+    ] = False,
+    timeout: Annotated[
+        float, typer.Option("--timeout", min=1, help="Seconds to wait for the browser to finish.")
+    ] = 900.0,
+) -> None:
+    """Drive the Chrome extension from the command line.
+
+    This is the unattended path: an agent runs it and the work happens in the
+    tabs the user is already signed into, with no popup and no clicking. Chrome
+    must be running with the extension enabled and `hskr bridge
+    --extension-id <ID>` already done.
+    """
+    settings = _settings(state_dir, headless=None)
+    try:
+        reply = run_command(action, settings, reveal=reveal, timeout=timeout)
+    except BridgeError as exc:
+        error_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if not reply.get("ok"):
+        error_console.print(f"[red]{reply.get('error', 'The browser reported a failure.')}[/red]")
+        raise typer.Exit(1)
+
+    _print_browser_reply(reply.get("reply"))
+
+
+def _print_browser_reply(reply: object) -> None:
+    """Render whatever the extension sent back, preferring a readable summary."""
+    if not isinstance(reply, dict):
+        console.print(reply if reply is not None else "Done.")
+        return
+
+    if isinstance(reply.get("attempts"), list):
+        attempts = reply["attempts"]
+        skipped = reply.get("skipped", 0)
+        console.print(f"[bold]{len(attempts)}[/bold] to attempt, [bold]{skipped}[/bold] skipped.")
+        for attempt in attempts:
+            console.print(f"  • {attempt.get('title')}")
+        for entry in reply.get("uncertain") or []:
+            console.print(f"  [yellow]?[/yellow] {entry.get('title')} → {entry.get('matched')}")
+
+        # The uncertain list is capped so the reply fits in one native message.
+        shown, total = len(reply.get("uncertain") or []), reply.get("uncertain_total", 0)
+        if total > shown:
+            console.print(f"  [dim]and {total - shown} more uncertain matches[/dim]")
+
+        # Without this, a library of nothing but unrevealed keys reports
+        # "0 to attempt" and gives no hint that --reveal is what it wants.
+        unrevealed = reply.get("unrevealed", 0)
+        if unrevealed:
+            console.print(
+                f"[yellow]{unrevealed} keys are unrevealed and were not counted."
+                " Pass --reveal to include them.[/yellow]"
+            )
+        return
+
+    if "attempted" in reply:
+        console.print(
+            f"[green]{reply.get('redeemed', 0)} redeemed[/green] of "
+            f"{reply.get('attempted', 0)} attempted; {reply.get('pending', 0)} still pending."
+        )
+        # Failures that never reached Steam spent no activation, so they are
+        # reported apart from the attempt count rather than folded into it.
+        before_steam = reply.get("failed_before_steam", 0)
+        if before_steam:
+            console.print(f"[yellow]{before_steam} never reached Steam and are still eligible.[/yellow]")
+        if reply.get("rate_limited"):
+            console.print("[yellow]Steam rate limit reached; rerun in about an hour.[/yellow]")
+        return
+
+    if "keys" in reply:
+        console.print(
+            f"[bold]{reply['keys']}[/bold] entries from {reply.get('orders', '?')} orders "
+            f"({reply.get('steam_keys', 0)} Steam keys, {reply.get('revealed', 0)} revealed)."
+        )
+        return
+
+    for name, value in reply.items():
+        console.print(f"{name}: {value}")
 
 
 @app.command()

@@ -76,8 +76,14 @@ path = "src/humble_steam_key_redeemer/__init__.py"
 [tool.hatch.build.targets.wheel]
 packages = ["src/humble_steam_key_redeemer"]
 
+# The extension ships inside the package, so `hskr bridge` can point a
+# pip-installed user at a directory that exists. A checkout-relative path only
+# resolves for someone working from the repository.
+[tool.hatch.build.targets.wheel.force-include]
+"extension" = "humble_steam_key_redeemer/extension"
+
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/tests", "/docs", "/README.md", "/LICENSE", "/CHANGELOG.md"]
+include = ["/src", "/tests", "/docs", "/extension", "/README.md", "/LICENSE", "/CHANGELOG.md"]
 
 # ------------------------------------------------------------ hatch envs
 
