@@ -1,0 +1,40 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  release-please:
+    name: Release Please
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - name: Enroll release pull requests for merge
+        if: steps.release.outputs.prs_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_PRS: ${{ steps.release.outputs.prs }}
+        run: |
+          printf '%s' "$RELEASE_PRS" | jq -r '.[].number' | while read -r pr_number; do
+            gh pr merge "$pr_number" --repo "$GH_REPO" --auto --merge
+          done
+      - name: Dispatch continuous delivery
+        if: steps.release.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag_name }}
+        run: gh workflow run cd.yml --repo "$GH_REPO" --ref main -f tag="$RELEASE_TAG"

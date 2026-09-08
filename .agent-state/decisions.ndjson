@@ -1,2 +1,4 @@
 {"ts":"2026-09-08T12:29:48.140Z","sha":"db5062d8c701fe01659f123f56fa5b91525a3c9c","subject":"Merge pull request #1 from jbcom/fix/operational-and-security","decision":null,"why":null,"resolves":[],"overrides":[],"source":"gh-pr-merge"}
 {"ts":"2026-09-08T12:31:42.014Z","sha":"96e89014ec4c919f7bead8dc3b755f09435d9f34","subject":"Merge pull request #2 from jbcom/chore/untrack-agent-state","decision":null,"why":null,"resolves":[],"overrides":[],"source":"gh-pr-merge"}
+{"ts":"2026-09-08T12:33:57.621Z","sha":"71f3de26b24d283b4afc062cab823e7c22194758","subject":"Merge pull request #3 from jbcom/chore/decision-log","decision":null,"why":null,"resolves":[],"overrides":[],"source":"gh-pr-merge"}
+{"ts":"2026-09-08T12:34:54.249Z","sha":"b314b959014e4c80d7e88116449cf1bab04e17a1","subject":"Merge pull request #4 from jbcom/ci/deploy-docs","decision":null,"why":null,"resolves":[],"overrides":[],"source":"gh-pr-merge"}
