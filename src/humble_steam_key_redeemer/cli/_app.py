@@ -43,6 +43,9 @@ error_console = Console(stderr=True)
 # How often to re-check whether a browser sign-in has completed.
 _LOGIN_POLL_SECONDS = 3
 
+# How many names to list before summarising the rest.
+_MAX_LISTED = 20
+
 
 def _version(value: bool) -> None:
     """Print the version and exit."""
@@ -582,6 +585,62 @@ def _print_browser_reply(reply: object) -> None:
 
     for name, value in reply.items():
         console.print(f"{name}: {value}")
+
+
+@app.command()
+def recheck(
+    state_dir: StateDirOption = None,
+    attempted: Annotated[
+        bool,
+        typer.Option(
+            "--attempted",
+            help="Also return keys left mid-activation. Steam may have accepted them.",
+        ),
+    ] = False,
+) -> None:
+    """Return keys that were settled in error to the pending pool.
+
+    Two states are terminal on purpose, and both can be reached wrongly.
+
+    `skipped` means a value did not look like a product key. When that
+    judgement improves — Steam issues more shapes than the obvious one — the
+    keys it rejected stay skipped, because nothing revisits a settled key.
+    This rechecks them against the current rule.
+
+    `attempted` means Steam saw the key but no verdict came back. Those are
+    left alone unless asked for, because Steam may well have accepted them and
+    a retry would spend one of about ten failed activations an hour.
+    """
+    from vendor_fabric.steam import is_valid_key  # noqa: PLC0415
+
+    from humble_steam_key_redeemer.core.models import KeyState  # noqa: PLC0415
+
+    settings = _settings(state_dir, headless=None)
+    store = RedeemerStore(settings.database_path)
+
+    restored: list[str] = []
+    for record in store.all_keys():
+        value = (record.redeemed_key_val or "").strip()
+
+        if record.state is KeyState.SKIPPED and value and is_valid_key(value):
+            record.state = KeyState.REVEALED
+        elif attempted and record.state is KeyState.ATTEMPTED:
+            record.state = KeyState.REVEALED if value else KeyState.UNREVEALED
+        else:
+            continue
+
+        store.update_key(record)
+        restored.append(record.human_name)
+
+    if not restored:
+        console.print("Nothing to recheck; no keys were settled in error.")
+        return
+
+    console.print(f"Returned [bold]{len(restored)}[/bold] keys to the pending pool:")
+    for name in restored[:_MAX_LISTED]:
+        console.print(f"  • {name}")
+    if len(restored) > _MAX_LISTED:
+        console.print(f"  [dim]and {len(restored) - _MAX_LISTED} more[/dim]")
 
 
 @app.command()

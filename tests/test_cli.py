@@ -378,3 +378,55 @@ class TestBrowserSummaries:
 
         assert "humble" in output
         assert "steam" in output
+
+
+class TestRecheck:
+    """Two states are terminal on purpose, and both can be reached wrongly."""
+
+    def _store(self, state_dir, **overrides) -> RedeemerStore:
+        store = RedeemerStore(state_dir / "redeemer.db")
+        values = {
+            "gamekey": "order1",
+            "machine_name": "celeste",
+            "human_name": "Celeste",
+            "key_type": "steam",
+            "redeemed_key_val": "AAAAA-BBBBB-CCCCC",
+            "state": KeyState.SKIPPED,
+        }
+        values.update(overrides)
+        store.upsert_keys([KeyRecord(**values)])
+        return store
+
+    def test_a_key_skipped_in_error_comes_back(self, state_dir):
+        """A validator that improves must not leave its old rejections stranded."""
+        store = self._store(state_dir)
+
+        result = runner.invoke(app, ["recheck", "--state-dir", str(state_dir)])
+
+        assert result.exit_code == 0
+        assert "Celeste" in result.output
+        assert store.all_keys()[0].state is KeyState.REVEALED
+
+    def test_a_gift_link_stays_skipped(self, state_dir):
+        """Sending one spends one of about ten failed activations an hour."""
+        store = self._store(state_dir, redeemed_key_val="https://www.humblebundle.com/gift?key=abc")
+
+        runner.invoke(app, ["recheck", "--state-dir", str(state_dir)])
+
+        assert store.all_keys()[0].state is KeyState.SKIPPED
+
+    def test_an_attempted_key_is_left_alone_by_default(self, state_dir):
+        """Steam may have accepted it; a silent retry would spend a failure."""
+        store = self._store(state_dir, state=KeyState.ATTEMPTED)
+
+        result = runner.invoke(app, ["recheck", "--state-dir", str(state_dir)])
+
+        assert "Nothing to recheck" in result.output
+        assert store.all_keys()[0].state is KeyState.ATTEMPTED
+
+    def test_an_attempted_key_comes_back_when_asked(self, state_dir):
+        store = self._store(state_dir, state=KeyState.ATTEMPTED)
+
+        runner.invoke(app, ["recheck", "--attempted", "--state-dir", str(state_dir)])
+
+        assert store.all_keys()[0].state is KeyState.REVEALED

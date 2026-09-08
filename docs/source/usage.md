@@ -71,6 +71,24 @@ hskr browser redeem --reveal
 Sets up that extension. `hskr bridge` prints the install steps; `hskr bridge
 --extension-id <ID>` registers the native messaging host.
 
+### `hskr recheck`
+
+Returns keys that were settled in error to the pending pool.
+
+Two states are terminal on purpose. `skipped` means a value did not look like
+a product key — and when that judgement improves, the keys it already rejected
+stay rejected, because nothing revisits a settled key. Steam issues more key
+shapes than the obvious one, so this has bitten real libraries.
+
+`attempted` means Steam saw the key but no verdict came back. Those are left
+alone unless you pass `--attempted`, because Steam may well have accepted them
+and a retry would spend one of the scarce failures.
+
+```bash
+hskr recheck               # re-examine keys skipped as malformed
+hskr recheck --attempted   # also return keys left mid-activation
+```
+
 ### `hskr logout`
 
 Deletes the saved Humble and Steam sessions.
