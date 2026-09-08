@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
 
@@ -10,9 +11,10 @@ from rich.console import Console
 from rich.table import Table
 
 from humble_steam_key_redeemer import __version__
-from humble_steam_key_redeemer.core import RedeemerStore, RedemptionEngine
+from humble_steam_key_redeemer.core import KeyRecord, RedeemerStore, RedemptionEngine
 from humble_steam_key_redeemer.humble import (
     HUMBLE_LOGIN_PAGE,
+    HumbleAPIError,
     HumbleBrowser,
     HumbleBrowserError,
     HumbleClient,
@@ -233,7 +235,24 @@ def redeem(
         if not yes and not typer.confirm(f"Attempt {len(attempts)} keys on Steam?", default=False):
             raise typer.Abort
 
-        summary = engine.redeem(plan, limit=limit, on_result=_report)
+        if reveal and needing_reveal:
+            # Revealing goes through Humble, so the browser is only opened when
+            # there is actually something to reveal.
+            if not yes and not typer.confirm(
+                f"Reveal {len(needing_reveal)} keys on Humble? This forfeits their gift "
+                "links and cannot be undone.",
+                default=False,
+            ):
+                raise typer.Abort
+            with HumbleBrowser(settings) as browser:
+                summary = engine.redeem(
+                    plan,
+                    limit=limit,
+                    on_result=_report,
+                    reveal=_revealer(HumbleClient(browser)),
+                )
+        else:
+            summary = engine.redeem(plan, limit=limit, on_result=_report)
 
     console.print(
         f"\n[green]{summary.redeemed} redeemed[/green], "
@@ -245,6 +264,29 @@ def redeem(
             "[yellow]Steam rate limit reached. It clears about an hour after the first "
             "attempt; rerun then.[/yellow]"
         )
+
+
+def _revealer(client: HumbleClient) -> Callable[[KeyRecord], str | None]:
+    """Build the callback the engine uses to reveal a key on Humble.
+
+    A key that Humble declines to reveal is reported and skipped rather than
+    aborting the run, since the remaining keys are still redeemable.
+
+    Args:
+        client: An authenticated Humble client.
+
+    Returns:
+        A callable returning the revealed key, or ``None`` on failure.
+    """
+
+    def reveal(record: KeyRecord) -> str | None:
+        try:
+            return client.reveal_key(record)
+        except HumbleAPIError as exc:
+            console.print(f"  [yellow]--[/yellow]  {record.human_name}: {exc}")
+            return None
+
+    return reveal
 
 
 def _print_plan(plan: object) -> None:

@@ -9,7 +9,7 @@ from typer.testing import CliRunner
 
 from humble_steam_key_redeemer import __version__
 from humble_steam_key_redeemer.cli import app
-from humble_steam_key_redeemer.core import KeyRecord, KeyState, RedeemerStore
+from humble_steam_key_redeemer.core import KeyRecord, KeyState, RedeemerStore, RedemptionEngine
 
 runner = CliRunner()
 
@@ -155,3 +155,94 @@ class TestLogout:
         assert result.exit_code == 0
         assert not (state_dir / "humble-session.json").exists()
         assert not (state_dir / "steam-session.json").exists()
+
+
+class TestRevealWiring:
+    """`--reveal` must actually reach the engine."""
+
+    @staticmethod
+    def _patch_gateway(monkeypatch):
+        class FakeGateway:
+            def __init__(self, *_a, **_k) -> None:
+                self.redeemed: list[str] = []
+
+            def restore(self) -> bool:
+                return True
+
+            def list_owned_apps(self) -> dict[int, str]:
+                return {}
+
+            def redeem_key(self, key: str) -> dict[str, object]:
+                self.redeemed.append(key)
+                return {"success": True, "result": None, "detail": "ok", "items": []}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_exc: object) -> None:
+                return None
+
+        monkeypatch.setattr("humble_steam_key_redeemer.cli._app.VendorFabricSteamGateway", FakeGateway)
+
+    def _unrevealed(self, state_dir):
+        store = RedeemerStore(state_dir / "redeemer.db")
+        store.upsert_keys(
+            [
+                KeyRecord(
+                    gamekey="order1",
+                    machine_name="unrevealed",
+                    human_name="Unrevealed Game",
+                    key_type="steam",
+                )
+            ]
+        )
+        return store
+
+    def test_without_reveal_the_key_is_skipped(self, state_dir, monkeypatch):
+        self._patch_gateway(monkeypatch)
+        self._unrevealed(state_dir)
+
+        result = runner.invoke(app, ["redeem", "--state-dir", str(state_dir), "--yes"])
+
+        assert result.exit_code == 0
+        assert "unrevealed and will be skipped" in result.stdout
+
+    def test_with_reveal_the_engine_receives_a_callback(self, state_dir, monkeypatch):
+        """Previously --reveal was accepted but never wired up, so it silently did nothing."""
+        self._patch_gateway(monkeypatch)
+        self._unrevealed(state_dir)
+
+        captured: dict[str, object] = {}
+        real_redeem = RedemptionEngine.redeem
+
+        def spy(self, plan, **kwargs):
+            captured["reveal"] = kwargs.get("reveal")
+            return real_redeem(self, plan, **kwargs)
+
+        monkeypatch.setattr(RedemptionEngine, "redeem", spy)
+        monkeypatch.setattr(
+            "humble_steam_key_redeemer.cli._app.HumbleBrowser",
+            lambda _settings: _FakeBrowserCtx(),
+        )
+        monkeypatch.setattr(
+            "humble_steam_key_redeemer.cli._app.HumbleClient",
+            lambda _browser: _FakeHumbleClient(),
+        )
+
+        result = runner.invoke(app, ["redeem", "--state-dir", str(state_dir), "--yes", "--reveal"])
+
+        assert result.exit_code == 0
+        assert captured["reveal"] is not None
+
+
+class _FakeBrowserCtx:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        return None
+
+
+class _FakeHumbleClient:
+    def reveal_key(self, _record) -> str:
+        return "ZZZZZ-YYYYY-XXXXX"
