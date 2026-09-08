@@ -436,9 +436,22 @@ def run_host(
             request = _queue.claim(state_dir)
             if request is None:
                 continue
-            outstanding[str(request.get("requestId"))] = request
-            with lock:
-                write_message(sink, request)
+            request_id = str(request.get("requestId"))
+            outstanding[request_id] = request
+            try:
+                with lock:
+                    write_message(sink, request)
+            except OSError as exc:
+                # The pipe is gone. Say so to whoever queued this, rather than
+                # letting this thread die and leaving every later instruction
+                # to expire against a host that looks alive.
+                outstanding.pop(request_id, None)
+                _queue.respond(
+                    state_dir,
+                    request_id,
+                    {"ok": False, "error": f"Could not reach the browser: {exc}"},
+                )
+                return
 
     pump = threading.Thread(target=forward_queued_requests, daemon=True)
     pump.start()

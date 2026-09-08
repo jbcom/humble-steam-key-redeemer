@@ -90,8 +90,13 @@ def submit(state_dir: Path, request: dict[str, Any]) -> str:
 def claim(state_dir: Path) -> dict[str, Any] | None:
     """Take the oldest pending request, if there is one.
 
-    The file is removed as it is claimed, so two hosts cannot serve the same
-    request twice.
+    The claim is a rename rather than a read followed by a delete, because two
+    hosts can be running at once — Chrome started one and someone started
+    another — and reading first would let both serve the same request. A
+    duplicated ``redeem`` is not a duplicated keystroke: it replays a whole
+    plan against a budget of about ten failed activations an hour.
+
+    Renaming is atomic, so exactly one caller wins and the loser moves on.
 
     Args:
         state_dir: The tool's state directory.
@@ -103,11 +108,22 @@ def claim(state_dir: Path) -> dict[str, Any] | None:
     now = time.time()
 
     for path in sorted(directory.glob("*.request"), key=lambda item: item.stat().st_mtime):
-        if now - path.stat().st_mtime > _STALE_SECONDS:
+        try:
+            if now - path.stat().st_mtime > _STALE_SECONDS:
+                path.unlink(missing_ok=True)
+                continue
+            # A hard link fails if the destination exists, which a rename does
+            # not: two hosts renaming to their own pid-named paths would both
+            # succeed. Both link to the *same* name, so exactly one wins.
+            claimed = path.with_suffix(".claimed")
+            os.link(path, claimed)
             path.unlink(missing_ok=True)
+        except OSError:
+            # Another host claimed or swept it first; it is theirs to serve.
             continue
-        request = _read(path)
-        path.unlink(missing_ok=True)
+
+        request = _read(claimed)
+        claimed.unlink(missing_ok=True)
         if request is not None:
             return request
     return None

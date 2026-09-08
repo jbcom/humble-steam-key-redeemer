@@ -69,6 +69,28 @@ class TestQueue:
         assert first == {"requestId": request_id, "action": "sync"}
         assert second is None
 
+    def test_concurrent_hosts_do_not_both_serve_a_request(self, settings):
+        """A duplicated redeem replays a whole plan against Steam's budget."""
+        for _ in range(20):
+            queue.submit(settings.state_dir, {"action": "redeem"})
+
+        served: list[dict] = []
+        barrier = threading.Barrier(4)
+
+        def host() -> None:
+            barrier.wait()
+            while (request := queue.claim(settings.state_dir)) is not None:
+                served.append(request)
+
+        threads = [threading.Thread(target=host) for _ in range(4)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        ids = [request["requestId"] for request in served]
+        assert len(ids) == len(set(ids)) == 20
+
     def test_a_reply_reaches_the_waiting_caller(self, settings):
         request_id = queue.submit(settings.state_dir, {"action": "status"})
         queue.respond(settings.state_dir, request_id, {"ok": True, "reply": {"humble": True}})
