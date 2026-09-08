@@ -165,6 +165,28 @@ class TestHostServesBothDirections:
 
         assert _messages(stdout.getvalue()) == [{"requestId": request_id, "action": "sync", "reveal": False}]
 
+    def test_a_disconnect_mid_run_tells_the_waiting_agent(self, settings):
+        """Otherwise the terminal sits out a timeout that can be 15 minutes."""
+        request_id = queue.submit(settings.state_dir, {"action": "redeem"})
+
+        stdin = _BlockingStream()
+        stdout = io.BytesIO()
+        host = threading.Thread(target=run_host, args=(stdin, stdout, settings), daemon=True)
+        host.start()
+        try:
+            # Wait until the instruction has actually gone out to the browser.
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline and not stdout.getvalue():
+                time.sleep(queue.POLL_SECONDS)
+        finally:
+            stdin.close()  # the browser goes away mid-run
+            host.join(timeout=5)
+
+        reply = queue.collect(settings.state_dir, request_id, timeout=2)
+        assert reply is not None
+        assert reply["ok"] is False
+        assert "disconnected" in reply["error"]
+
     def test_a_question_is_answered_under_the_id_it_asked_with(self, settings):
         """Both directions share one pipe, so replies must be correlatable."""
         stdin = io.BytesIO(_framed({"command": "status", "replyTo": "abc"}))

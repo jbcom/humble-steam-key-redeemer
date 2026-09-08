@@ -224,13 +224,21 @@ async function askHskr(command, payload = {}) {
   const id = crypto.randomUUID();
 
   return new Promise((resolve, reject) => {
-    const onMessage = (message) => {
-      if (message?.replyTo !== id) return;
+    // Both listeners are removed on either outcome. A redeem run asks a
+    // question per key, so listeners that outlived their question would
+    // accumulate for the length of the run.
+    const done = (settle, value) => {
       port.onMessage.removeListener(onMessage);
-      resolve(message.reply);
+      port.onDisconnect.removeListener(onDisconnect);
+      settle(value);
     };
+    const onMessage = (message) => {
+      if (message?.replyTo === id) done(resolve, message.reply);
+    };
+    const onDisconnect = () => done(reject, new Error("hskr disconnected"));
+
     port.onMessage.addListener(onMessage);
-    port.onDisconnect.addListener(() => reject(new Error("hskr disconnected")));
+    port.onDisconnect.addListener(onDisconnect);
     port.postMessage({ replyTo: id, command, ...payload });
   });
 }
@@ -347,23 +355,33 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
 // polling or listening on a socket.
 let commandPort = null;
 
-/** Open the long-lived port hskr sends instructions over. */
+/**
+ * Open the long-lived port hskr sends instructions over.
+ *
+ * Throws when the native host is not registered, which is the common setup
+ * mistake: Chrome will only start a host whose manifest names this extension,
+ * so `hskr bridge --extension-id <ID>` has to have been run.
+ */
 function connectToHost() {
   if (commandPort) return commandPort;
 
-  commandPort = chrome.runtime.connectNative(HOST);
+  const port = chrome.runtime.connectNative(HOST);
+  commandPort = port;
 
-  commandPort.onMessage.addListener(async (message) => {
+  port.onMessage.addListener(async (message) => {
     if (!message?.action) return;
     const reply = await dispatch(message);
-    commandPort?.postMessage({ requestId: message.requestId, ...reply });
+    // Replies go back down the port the instruction arrived on. A redeem run
+    // takes minutes, long enough for the port to have dropped and a new one to
+    // have replaced it, and the agent waiting is attached to this one.
+    port.postMessage({ requestId: message.requestId, ...reply });
   });
 
-  commandPort.onDisconnect.addListener(() => {
-    commandPort = null;
+  port.onDisconnect.addListener(() => {
+    if (commandPort === port) commandPort = null;
   });
 
-  return commandPort;
+  return port;
 }
 
 // Reconnect whenever the service worker starts, so the port is available

@@ -426,11 +426,17 @@ def run_host(
     stop = threading.Event()
     lock = threading.Lock()
 
+    # Instructions sent to the extension but not yet answered. If the browser
+    # goes away mid-run, whoever is waiting on one is told so rather than
+    # sitting out a timeout that could be a quarter of an hour.
+    outstanding: dict[str, dict[str, Any]] = {}
+
     def forward_queued_requests() -> None:
         while not stop.wait(_queue.POLL_SECONDS):
             request = _queue.claim(state_dir)
             if request is None:
                 continue
+            outstanding[str(request.get("requestId"))] = request
             with lock:
                 write_message(sink, request)
 
@@ -453,6 +459,7 @@ def run_host(
             # waiting rather than being handled here.
             request_id = message.get("requestId")
             if request_id:
+                outstanding.pop(str(request_id), None)
                 _queue.respond(state_dir, str(request_id), message)
                 continue
 
@@ -466,6 +473,13 @@ def run_host(
                 write_message(sink, framed)
     finally:
         stop.set()
+        # Whatever the browser never answered will never be answered now.
+        for pending_id in list(outstanding):
+            _queue.respond(
+                state_dir,
+                pending_id,
+                {"ok": False, "error": "The browser disconnected before finishing."},
+            )
 
 
 def _manifest_directory() -> Path:
