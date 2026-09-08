@@ -91,6 +91,25 @@ class TestQueue:
         ids = [request["requestId"] for request in served]
         assert len(ids) == len(set(ids)) == 20
 
+    def test_a_corrupt_request_is_discarded_not_served(self, settings):
+        """Half a JSON file is not an instruction to act on."""
+        directory = queue.queue_directory(settings.state_dir)
+        (directory / "broken.request").write_text('{"action": "rede')
+
+        assert queue.claim(settings.state_dir) is None
+        # And it does not linger to be retried forever.
+        assert list(directory.glob("*.request")) == []
+
+    def test_a_good_request_after_a_corrupt_one_is_still_served(self, settings):
+        directory = queue.queue_directory(settings.state_dir)
+        (directory / "broken.request").write_text("not json at all")
+        request_id = queue.submit(settings.state_dir, {"action": "status"})
+
+        claimed = queue.claim(settings.state_dir)
+
+        assert claimed is not None
+        assert claimed["requestId"] == request_id
+
     def test_a_reply_reaches_the_waiting_caller(self, settings):
         request_id = queue.submit(settings.state_dir, {"action": "status"})
         queue.respond(settings.state_dir, request_id, {"ok": True, "reply": {"humble": True}})

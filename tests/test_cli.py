@@ -347,3 +347,34 @@ class TestBrowserOutput:
 
         assert "3 redeemed" in output
         assert "never reached Steam" in output
+
+
+class TestBrowserSummaries:
+    """Each reply shape the bridge sends has to render as something readable."""
+
+    def _render(self, state_dir, monkeypatch, reply: dict, action: str = "sync") -> str:
+        monkeypatch.setattr(
+            "humble_steam_key_redeemer.cli._app.run_command",
+            lambda *a, **k: {"ok": True, "reply": reply},
+        )
+        result = runner.invoke(app, ["browser", action, "--state-dir", str(state_dir)])
+        assert result.exit_code == 0
+        return result.output
+
+    def test_an_import_reports_what_it_found(self, state_dir, monkeypatch):
+        output = self._render(
+            state_dir,
+            monkeypatch,
+            {"orders": 47, "keys": 310, "steam_keys": 288, "revealed": 12},
+        )
+
+        assert "310" in output
+        assert "47" in output
+        assert "288" in output
+
+    def test_an_unfamiliar_shape_still_prints_rather_than_vanishing(self, state_dir, monkeypatch):
+        """A reply this does not recognise must not render as nothing."""
+        output = self._render(state_dir, monkeypatch, {"humble": True, "steam": False}, "status")
+
+        assert "humble" in output
+        assert "steam" in output
