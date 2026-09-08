@@ -2,10 +2,10 @@
 # Created by https://www.toptal.com/developers/gitignore/api/python
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
 
-#Used files
+# Tool output and local state
 *.csv
-.*cookies
-skipped.txt
+docs/build/
+.tox/
 
 ### Python ###
 # Byte-compiled / optimized / DLL files
