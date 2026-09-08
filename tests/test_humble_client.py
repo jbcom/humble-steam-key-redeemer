@@ -144,3 +144,35 @@ class TestPartialOrderData:
         browser = FakeBrowser([RuntimeError("Humble returned HTTP 429 for order o1")])
         with pytest.raises(HumbleAPIError, match="Could not read Humble order details"):
             HumbleClient(browser).order_details(["o1"])
+
+
+class TestQuietLoginCheck:
+    """Polling with a check that navigates makes signing in impossible.
+
+    `is_logged_in` navigates to the library, which is fine once. Called every
+    three seconds while someone is typing into the login or two-factor form, it
+    replaces that form each time.
+    """
+
+    def test_it_does_not_navigate(self):
+        browser = FakeBrowser([True])
+        client = HumbleClient(browser)
+
+        assert client.is_logged_in_quietly() is True
+        assert browser.visited == []
+
+    def test_the_navigating_check_still_navigates(self):
+        """The other method keeps its behaviour; this is an addition."""
+        browser = FakeBrowser([True])
+        HumbleClient(browser).is_logged_in()
+
+        assert browser.visited != []
+
+    def test_a_page_that_cannot_answer_is_not_signed_in(self):
+        """Mid-navigation the evaluate throws; that is not an answer yet."""
+        browser = FakeBrowser([RuntimeError("Execution context was destroyed")])
+
+        assert HumbleClient(browser).is_logged_in_quietly() is False
+
+    def test_a_signed_out_session_reports_false(self):
+        assert HumbleClient(FakeBrowser([False])).is_logged_in_quietly() is False
