@@ -7,6 +7,11 @@
 docs/build/
 .tox/
 
+# Local agent tooling. The skills are symlinks into ~/.agents, so they would
+# be broken links in anyone else's clone.
+.claude/
+skills-lock.json
+
 # Agent session cache. Re-derivable, and the end-of-file-fixer hook rewrites
 # it on every run; only directive.md and decisions.ndjson are durable state.
 .agent-state/session-logs/
