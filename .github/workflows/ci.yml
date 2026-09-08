@@ -72,3 +72,42 @@ jobs:
         with:
           enable-cache: true
       - run: uvx --from tox --with tox-uv tox -e build
+
+  # One context for branch protection to require, rather than eight named jobs.
+  # A matrix job renamed or a Python version added would otherwise silently
+  # stop being enforced, and an automated release PR — which does not run these
+  # — could never satisfy them at all.
+  gate:
+    name: CI / gate
+    if: always()
+    needs: [lint, typecheck, test, docs, build]
+    runs-on: ubuntu-latest
+    env:
+      EVENT_NAME: ${{ github.event_name }}
+      SKIP_AUTOMATED_PR_VALIDATION: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--') }}
+      LINT_RESULT: ${{ needs.lint.result }}
+      TYPECHECK_RESULT: ${{ needs.typecheck.result }}
+      TEST_RESULT: ${{ needs.test.result }}
+      DOCS_RESULT: ${{ needs.docs.result }}
+      BUILD_RESULT: ${{ needs.build.result }}
+    steps:
+      - name: Enforce all CI results
+        shell: bash
+        run: |
+          if [[ "$SKIP_AUTOMATED_PR_VALIDATION" == "true" ]]; then
+            echo "Release PR: validation jobs intentionally skipped."
+            exit 0
+          fi
+          required=(
+            "$LINT_RESULT"
+            "$TYPECHECK_RESULT"
+            "$TEST_RESULT"
+            "$DOCS_RESULT"
+            "$BUILD_RESULT"
+          )
+          for result in "${required[@]}"; do
+            if [[ "$result" != "success" ]]; then
+              echo "A required CI job did not succeed: $result" >&2
+              exit 1
+            fi
+          done
