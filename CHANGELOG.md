@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.2.0](https://github.com/jbcom/humble-steam-key-redeemer/compare/humble-steam-key-redeemer-v1.1.0...humble-steam-key-redeemer-v1.2.0) (2026-09-08)
+
+
+### Features
+
+* add hskr recheck, so a wrongly settled key is not lost forever ([fec5b04](https://github.com/jbcom/humble-steam-key-redeemer/commit/fec5b044d2329a7fb534a0b0a6c30091c320605a))
+* add hskr recheck, so a wrongly settled key is not lost forever ([746d04f](https://github.com/jbcom/humble-steam-key-redeemer/commit/746d04f83d463b82862bddbfd33359eb5a31d256))
+
+
+### Bug Fixes
+
+* recheck only ever returns Steam keys ([7fe82ae](https://github.com/jbcom/humble-steam-key-redeemer/commit/7fe82aede07f9a0131bb5874fd6226fbaf903cc4))
+
 ## [1.1.0](https://github.com/jbcom/humble-steam-key-redeemer/compare/humble-steam-key-redeemer-v1.0.0...humble-steam-key-redeemer-v1.1.0) (2026-09-08)
 
 
