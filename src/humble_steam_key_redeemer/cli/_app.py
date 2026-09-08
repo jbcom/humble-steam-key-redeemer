@@ -12,7 +12,13 @@ from rich.console import Console
 from rich.table import Table
 
 from humble_steam_key_redeemer import __version__
-from humble_steam_key_redeemer.bridge import install_manifest, run_host
+from humble_steam_key_redeemer.bridge import (
+    BROWSER_ACTIONS,
+    BridgeError,
+    install_manifest,
+    run_command,
+    run_host,
+)
 from humble_steam_key_redeemer.core import KeyRecord, RedeemerStore, RedemptionEngine
 from humble_steam_key_redeemer.humble import (
     HUMBLE_LOGIN_PAGE,
@@ -448,6 +454,81 @@ def bridge(
     manifest = install_manifest(extension_id)
     console.print(f"Registered native messaging host at [bold]{manifest}[/bold].")
     console.print("Reload the extension in chrome://extensions, then use its toolbar button.")
+
+
+@app.command()
+def browser(
+    action: Annotated[
+        str,
+        typer.Argument(help=f"What the browser should do: {', '.join(BROWSER_ACTIONS)}."),
+    ],
+    state_dir: StateDirOption = None,
+    reveal: Annotated[
+        bool,
+        typer.Option(
+            "--reveal/--no-reveal",
+            help="Reveal unrevealed Humble keys. This forfeits gift links and cannot be undone.",
+        ),
+    ] = False,
+    timeout: Annotated[
+        float, typer.Option("--timeout", min=1, help="Seconds to wait for the browser to finish.")
+    ] = 900.0,
+) -> None:
+    """Drive the Chrome extension from the command line.
+
+    This is the unattended path: an agent runs it and the work happens in the
+    tabs the user is already signed into, with no popup and no clicking. Chrome
+    must be running with the extension enabled and `hskr bridge
+    --extension-id <ID>` already done.
+    """
+    settings = _settings(state_dir, headless=None)
+    try:
+        reply = run_command(action, settings, reveal=reveal, timeout=timeout)
+    except BridgeError as exc:
+        error_console.print(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+
+    if not reply.get("ok"):
+        error_console.print(f"[red]{reply.get('error', 'The browser reported a failure.')}[/red]")
+        raise typer.Exit(1)
+
+    _print_browser_reply(reply.get("reply"))
+
+
+def _print_browser_reply(reply: object) -> None:
+    """Render whatever the extension sent back, preferring a readable summary."""
+    if not isinstance(reply, dict):
+        console.print(reply if reply is not None else "Done.")
+        return
+
+    if isinstance(reply.get("attempts"), list):
+        attempts = reply["attempts"]
+        skipped = reply.get("skipped", 0)
+        console.print(f"[bold]{len(attempts)}[/bold] to attempt, [bold]{skipped}[/bold] skipped.")
+        for attempt in attempts:
+            console.print(f"  • {attempt.get('title')}")
+        for entry in reply.get("uncertain") or []:
+            console.print(f"  [yellow]?[/yellow] {entry.get('title')} → {entry.get('matched')}")
+        return
+
+    if "attempted" in reply:
+        console.print(
+            f"[green]{reply.get('redeemed', 0)} redeemed[/green] of "
+            f"{reply.get('attempted', 0)} attempted; {reply.get('pending', 0)} still pending."
+        )
+        if reply.get("rate_limited"):
+            console.print("[yellow]Steam rate limit reached; rerun in about an hour.[/yellow]")
+        return
+
+    if "keys" in reply:
+        console.print(
+            f"[bold]{reply['keys']}[/bold] entries from {reply.get('orders', '?')} orders "
+            f"({reply.get('steam_keys', 0)} Steam keys, {reply.get('revealed', 0)} revealed)."
+        )
+        return
+
+    for name, value in reply.items():
+        console.print(f"{name}: {value}")
 
 
 @app.command()

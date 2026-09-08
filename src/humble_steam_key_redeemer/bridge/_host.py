@@ -14,10 +14,12 @@ from __future__ import annotations
 import json
 import struct
 import sys
+import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from humble_steam_key_redeemer.bridge import _queue
 from humble_steam_key_redeemer.core import RedeemerStore, RedemptionEngine
 from humble_steam_key_redeemer.settings import Settings
 
@@ -348,25 +350,122 @@ class _StaticSteam:
         raise BridgeError("Redemption happens in the browser, not here")
 
 
-def run_host(stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> None:
-    """Serve native messages until the browser closes the connection.
+# Actions the extension performs in the user's tabs, as opposed to questions it
+# asks this process. An agent drives these; a person would click them.
+BROWSER_ACTIONS = ("status", "sync", "preview", "redeem")
+
+
+def run_command(
+    action: str,
+    settings: Settings | None = None,
+    *,
+    reveal: bool = False,
+    timeout: float = 900.0,
+) -> dict[str, Any]:
+    """Instruct the extension to perform one action and return its reply.
+
+    An agent runs this from a terminal, where there is no pipe into the browser:
+    Chrome starts the native host itself and owns both ends of it. So the
+    instruction goes into the request queue, the host Chrome already started
+    forwards it to the extension, and the reply comes back the same way. Nobody
+    has to open the popup and click.
+
+    Args:
+        action: One of :data:`BROWSER_ACTIONS`.
+        settings: Runtime configuration; defaults to the environment's.
+        reveal: Whether redemption may reveal keys on Humble first.
+        timeout: Seconds to wait for the browser to finish.
+
+    Returns:
+        The extension's reply.
+
+    Raises:
+        BridgeError: If the action is unknown or nothing answered in time.
+    """
+    if action not in BROWSER_ACTIONS:
+        raise BridgeError(f"Unknown browser action: {action!r}")
+
+    settings = settings or Settings()
+    state_dir = settings.ensure_state_dir()
+
+    request_id = _queue.submit(state_dir, {"action": action, "reveal": reveal})
+    reply = _queue.collect(state_dir, request_id, timeout)
+    if reply is None:
+        raise BridgeError(
+            "The browser did not respond. Check that Chrome is running with the "
+            "extension enabled, and that `hskr bridge --extension-id <ID>` has been run."
+        )
+    return reply
+
+
+def run_host(
+    stdin: BinaryIO | None = None,
+    stdout: BinaryIO | None = None,
+    settings: Settings | None = None,
+) -> None:
+    """Serve the extension until the browser closes the connection.
+
+    Traffic runs both ways over the one pipe Chrome owns. The extension asks
+    questions of this process — what is worth redeeming, what a result meant —
+    and this process pushes instructions the other way when an agent has queued
+    one. Both are multiplexed here because Chrome gives a native host exactly
+    one stdio channel, and it is the only channel that reaches the extension.
 
     Args:
         stdin: Input stream; defaults to the process's.
         stdout: Output stream; defaults to the process's.
+        settings: Runtime configuration; defaults to the environment's.
     """
     source = stdin or sys.stdin.buffer
     sink = stdout or sys.stdout.buffer
+    settings = settings or Settings()
+    state_dir = settings.ensure_state_dir()
 
-    while True:
-        try:
-            message = read_message(source)
-        except BridgeError as exc:
-            write_message(sink, {"ok": False, "error": str(exc)})
-            return
-        if message is None:
-            return
-        write_message(sink, handle_message(message))
+    # Reading stdin blocks, so the queue is watched on its own thread. It only
+    # ever writes instructions; replies come back through the read loop below.
+    stop = threading.Event()
+    lock = threading.Lock()
+
+    def forward_queued_requests() -> None:
+        while not stop.wait(_queue.POLL_SECONDS):
+            request = _queue.claim(state_dir)
+            if request is None:
+                continue
+            with lock:
+                write_message(sink, request)
+
+    pump = threading.Thread(target=forward_queued_requests, daemon=True)
+    pump.start()
+
+    try:
+        while True:
+            try:
+                message = read_message(source)
+            except BridgeError as exc:
+                with lock:
+                    write_message(sink, {"ok": False, "error": str(exc)})
+                return
+            if message is None:
+                return
+
+            # A message carrying a requestId is the extension answering an
+            # instruction an agent queued, so it goes back to whoever is
+            # waiting rather than being handled here.
+            request_id = message.get("requestId")
+            if request_id:
+                _queue.respond(state_dir, str(request_id), message)
+                continue
+
+            # Questions and instructions share one pipe, so a question's reply
+            # carries the id the extension asked under; otherwise the extension
+            # cannot tell which of its outstanding calls was answered.
+            reply = handle_message(message, settings)
+            reply_to = message.get("replyTo")
+            framed = {"replyTo": reply_to, "reply": reply} if reply_to else reply
+            with lock:
+                write_message(sink, framed)
+    finally:
+        stop.set()
 
 
 def _manifest_directory() -> Path:
@@ -430,11 +529,13 @@ def _default_executable() -> str:
 
 
 __all__ = [
+    "BROWSER_ACTIONS",
     "NATIVE_HOST_NAME",
     "BridgeError",
     "handle_message",
     "install_manifest",
     "read_message",
+    "run_command",
     "run_host",
     "write_message",
 ]

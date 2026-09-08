@@ -210,9 +210,29 @@ async function redeemKey(key) {
 
 // ------------------------------------------------------------------ hskr
 
-/** Ask hskr what to do, handing it what the browser just read. */
+/**
+ * Ask hskr what to do, handing it what the browser just read.
+ *
+ * This goes down the same long-lived port that carries instructions the other
+ * way, rather than `sendNativeMessage`, which starts a *separate* host process
+ * per call. Only the process holding this port is watching the request queue,
+ * so a one-shot process would answer the question and leave an agent's
+ * instruction unserved.
+ */
 async function askHskr(command, payload = {}) {
-  return chrome.runtime.sendNativeMessage(HOST, { command, ...payload });
+  const port = connectToHost();
+  const id = crypto.randomUUID();
+
+  return new Promise((resolve, reject) => {
+    const onMessage = (message) => {
+      if (message?.replyTo !== id) return;
+      port.onMessage.removeListener(onMessage);
+      resolve(message.reply);
+    };
+    port.onMessage.addListener(onMessage);
+    port.onDisconnect.addListener(() => reject(new Error("hskr disconnected")));
+    port.postMessage({ replyTo: id, command, ...payload });
+  });
 }
 
 /** Import the library: browser reads the orders, hskr stores and analyses them. */
@@ -299,15 +319,55 @@ const ACTIONS = {
   redeem: (message) => redeem({ reveal: Boolean(message.reveal) }),
 };
 
+/** Run one action and normalize both outcomes into a reply. */
+async function dispatch(message) {
+  try {
+    const action = ACTIONS[message.action];
+    if (!action) throw new Error(`Unknown action: ${message.action}`);
+    return { ok: true, reply: await action(message) };
+  } catch (error) {
+    return { ok: false, error: String(error.message || error) };
+  }
+}
+
+// From the popup, when a person clicks a button.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  (async () => {
-    try {
-      const action = ACTIONS[message.action];
-      if (!action) throw new Error(`Unknown action: ${message.action}`);
-      sendResponse({ ok: true, reply: await action(message) });
-    } catch (error) {
-      sendResponse({ ok: false, error: String(error.message || error) });
-    }
-  })();
+  dispatch(message).then(sendResponse);
   return true; // keep the channel open for the async reply
 });
+
+// From hskr, when an agent or script runs a command.
+//
+// The popup is for a person; this is the same work driven from outside the
+// browser, so an unattended run needs no one to click anything. hskr connects,
+// sends the action, and the extension does the work in the user's tabs.
+//
+// Chrome only lets an extension connect to a native host, never the reverse, so
+// the extension holds the port open and waits for instructions rather than
+// polling or listening on a socket.
+let commandPort = null;
+
+/** Open the long-lived port hskr sends instructions over. */
+function connectToHost() {
+  if (commandPort) return commandPort;
+
+  commandPort = chrome.runtime.connectNative(HOST);
+
+  commandPort.onMessage.addListener(async (message) => {
+    if (!message?.action) return;
+    const reply = await dispatch(message);
+    commandPort?.postMessage({ requestId: message.requestId, ...reply });
+  });
+
+  commandPort.onDisconnect.addListener(() => {
+    commandPort = null;
+  });
+
+  return commandPort;
+}
+
+// Reconnect whenever the service worker starts, so the port is available
+// without anyone opening the popup.
+chrome.runtime.onStartup.addListener(connectToHost);
+chrome.runtime.onInstalled.addListener(connectToHost);
+connectToHost();
