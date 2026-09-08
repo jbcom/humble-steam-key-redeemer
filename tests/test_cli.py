@@ -415,6 +415,25 @@ class TestRecheck:
 
         assert store.all_keys()[0].state is KeyState.SKIPPED
 
+    def test_a_non_steam_key_is_left_alone(self, state_dir):
+        """Real libraries hold Desura, Uplay and console keys of the same shape.
+
+        Returning one to the pending pool claims it is worth an activation it
+        can never win.
+        """
+        store = self._store(
+            state_dir,
+            machine_name="farcry3",
+            human_name="Far Cry 3",
+            key_type="uplay",
+            redeemed_key_val="TL3L-HKNL-CLRK-9VV6",
+        )
+
+        result = runner.invoke(app, ["recheck", "--state-dir", str(state_dir)])
+
+        assert "Nothing to recheck" in result.output
+        assert store.all_keys()[0].state is KeyState.SKIPPED
+
     def test_an_attempted_key_is_left_alone_by_default(self, state_dir):
         """Steam may have accepted it; a silent retry would spend a failure."""
         store = self._store(state_dir, state=KeyState.ATTEMPTED)

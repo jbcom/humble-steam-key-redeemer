@@ -620,6 +620,12 @@ def recheck(
 
     restored: list[str] = []
     for record in store.all_keys():
+        # Only Steam keys. A real library holds Desura, Uplay, Nintendo and
+        # PlayStation keys whose shapes overlap Steam's, and returning one to
+        # the pending pool claims it is worth an activation it can never win.
+        if not record.is_steam:
+            continue
+
         value = (record.redeemed_key_val or "").strip()
 
         if record.state is KeyState.SKIPPED and value and is_valid_key(value):
