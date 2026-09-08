@@ -543,6 +543,20 @@ def _print_browser_reply(reply: object) -> None:
             console.print(f"  • {attempt.get('title')}")
         for entry in reply.get("uncertain") or []:
             console.print(f"  [yellow]?[/yellow] {entry.get('title')} → {entry.get('matched')}")
+
+        # The uncertain list is capped so the reply fits in one native message.
+        shown, total = len(reply.get("uncertain") or []), reply.get("uncertain_total", 0)
+        if total > shown:
+            console.print(f"  [dim]and {total - shown} more uncertain matches[/dim]")
+
+        # Without this, a library of nothing but unrevealed keys reports
+        # "0 to attempt" and gives no hint that --reveal is what it wants.
+        unrevealed = reply.get("unrevealed", 0)
+        if unrevealed:
+            console.print(
+                f"[yellow]{unrevealed} keys are unrevealed and were not counted."
+                " Pass --reveal to include them.[/yellow]"
+            )
         return
 
     if "attempted" in reply:
@@ -550,6 +564,11 @@ def _print_browser_reply(reply: object) -> None:
             f"[green]{reply.get('redeemed', 0)} redeemed[/green] of "
             f"{reply.get('attempted', 0)} attempted; {reply.get('pending', 0)} still pending."
         )
+        # Failures that never reached Steam spent no activation, so they are
+        # reported apart from the attempt count rather than folded into it.
+        before_steam = reply.get("failed_before_steam", 0)
+        if before_steam:
+            console.print(f"[yellow]{before_steam} never reached Steam and are still eligible.[/yellow]")
         if reply.get("rate_limited"):
             console.print("[yellow]Steam rate limit reached; rerun in about an hour.[/yellow]")
         return
