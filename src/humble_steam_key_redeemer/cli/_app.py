@@ -459,7 +459,10 @@ def bridge(
     that extension talk to this tool.
     """
     if serve:
-        run_host()
+        # Honour --state-dir here too. The launcher exports HSKR_STATE_DIR, so
+        # the host Chrome starts already reads the right directory, but a host
+        # started by hand with the flag must not silently use another one.
+        run_host(settings=_settings(state_dir, headless=None))
         return
 
     settings = _settings(state_dir, headless=None)

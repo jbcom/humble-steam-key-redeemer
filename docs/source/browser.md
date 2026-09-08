@@ -96,7 +96,7 @@ directions over it, because it is the only channel that reaches the extension.
 | `scripting` | Run the fetches inside the Humble and Steam pages, so they carry your session. |
 | `tabs` | Find the Humble and Steam tabs, or open them. |
 | `alarms` | Reconnect after Chrome terminates the service worker. |
-| `host_permissions` | Limited to `humblebundle.com` and `store.steampowered.com`. |
+| `host_permissions` | Limited to `humblebundle.com`, `store.steampowered.com`, and `steamcommunity.com` — the last for the account's own games list, which is where the names come from. |
 
 Nothing is sent anywhere but Humble, Steam, and the copy of `hskr` on your own
 machine.

@@ -31,7 +31,13 @@ async function tabFor(urlPrefix) {
 }
 
 /**
- * Run a function in the page's own context.
+ * Run a function against the page, in the extension's isolated world.
+ *
+ * Isolated rather than MAIN: these functions handle product keys, and code in
+ * MAIN shares the page's globals, so a compromised or hostile Steam page could
+ * replace `fetch` and read every key as it went past. An isolated world has
+ * its own globals but still sends the page's cookies on a same-origin request,
+ * which is the only thing MAIN was ever needed for.
  *
  * Arguments cross into the page over Chrome's structured channel rather than
  * being interpolated into source, so a title or key containing a quote is
@@ -40,7 +46,7 @@ async function tabFor(urlPrefix) {
 async function inPage(tabId, fn, args = []) {
   const [result] = await chrome.scripting.executeScript({
     target: { tabId },
-    world: "MAIN",
+    world: "ISOLATED",
     func: fn,
     args,
   });
