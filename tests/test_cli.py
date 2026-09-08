@@ -421,12 +421,15 @@ class TestRecheck:
         Returning one to the pending pool claims it is worth an activation it
         can never win.
         """
+        # A key shape the validator definitely accepts, so this tests the
+        # platform guard rather than accidentally passing because the value
+        # was rejected for looking malformed.
         store = self._store(
             state_dir,
             machine_name="farcry3",
             human_name="Far Cry 3",
             key_type="uplay",
-            redeemed_key_val="TL3L-HKNL-CLRK-9VV6",
+            redeemed_key_val="AAAAA-BBBBB-CCCCC",
         )
 
         result = runner.invoke(app, ["recheck", "--state-dir", str(state_dir)])
