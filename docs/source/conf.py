@@ -78,7 +78,7 @@ intersphinx_mapping = {
     "python": ("https://docs.python.org/3", None),
 }
 
-ogp_site_url = "https://jbcom.github.io/humble-steam-key-redeemer/"
+ogp_site_url = "https://jonbogaty.com/humble-steam-key-redeemer/"
 ogp_description_length = 200
 
 nitpicky = False

@@ -70,7 +70,7 @@ with `--state-dir` or `HSKR_STATE_DIR`, and clear it with `hskr logout`.
 ## Documentation
 
 Full documentation, including configuration, design notes, and the API
-reference: <https://jbcom.github.io/humble-steam-key-redeemer/>
+reference: <https://jonbogaty.com/humble-steam-key-redeemer/>
 
 ## Development
 

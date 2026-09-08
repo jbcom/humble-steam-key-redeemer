@@ -63,7 +63,7 @@ humble-steam-key-redeemer = "humble_steam_key_redeemer.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/jbcom/humble-steam-key-redeemer"
-Documentation = "https://jbcom.github.io/humble-steam-key-redeemer/"
+Documentation = "https://jonbogaty.com/humble-steam-key-redeemer/"
 Repository = "https://github.com/jbcom/humble-steam-key-redeemer"
 Issues = "https://github.com/jbcom/humble-steam-key-redeemer/issues"
 
