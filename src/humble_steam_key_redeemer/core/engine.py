@@ -17,6 +17,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Protocol
 
+from vendor_fabric.steam import is_valid_key
+
 from humble_steam_key_redeemer.core.matching import MatchDecision, OwnershipMatcher
 from humble_steam_key_redeemer.core.models import KeyRecord, KeyState, RedemptionAttempt
 
@@ -227,6 +229,15 @@ class RedemptionEngine:
             # human decides, because Steam may well have accepted it.
             record.state = KeyState.ATTEMPTED
             self._store.update_key(record)
+
+            if not is_valid_key(key_value):
+                # Gift links and placeholder text live in the same field as
+                # real keys. Sending one to Steam spends a failed activation,
+                # and only ten of those are allowed per hour.
+                record.state = KeyState.SKIPPED
+                self._store.update_key(record)
+                summary.skipped += 1
+                continue
 
             outcome = self._steam.redeem_key(key_value)
             attempt = self._record(record, outcome)

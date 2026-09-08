@@ -249,3 +249,31 @@ class TestInterruptedActivation:
         """Steam may have accepted it, so a retry could spend a failure."""
         _seed(store, _key("A", 1, state=KeyState.ATTEMPTED))
         assert store.pending_keys() == []
+
+
+class TestNonKeyValues:
+    """Gift links share a field with real keys."""
+
+    def test_a_gift_link_is_never_sent_to_steam(self, store):
+        """Steam counts a malformed code as one of ten hourly failures."""
+        records = _seed(
+            store,
+            _key("Gift Link Game", 1, redeemed_key_val="https://humblebundle.com/gift?key=abc"),
+        )
+        steam = FakeSteam()
+        engine = RedemptionEngine(store, steam)
+
+        summary = engine.redeem(engine.plan(records))
+
+        assert steam.redeemed == []
+        assert summary.skipped == 1
+        assert store.all_keys()[0].state is KeyState.SKIPPED
+
+    def test_a_well_formed_key_still_goes_through(self, store):
+        records = _seed(store, _key("Real Game", 1, redeemed_key_val="AAAAA-BBBBB-CCCCC"))
+        steam = FakeSteam(results=[Result.OK])
+        engine = RedemptionEngine(store, steam)
+
+        engine.redeem(engine.plan(records))
+
+        assert steam.redeemed == ["AAAAA-BBBBB-CCCCC"]

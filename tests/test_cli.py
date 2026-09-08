@@ -116,7 +116,7 @@ class TestRedeem:
             def __init__(self, *_args, **_kwargs) -> None:
                 self.redeemed: list[str] = []
 
-            def restore(self) -> bool:
+            def restore(self, account_name: str | None = None) -> bool:
                 return True
 
             def list_owned_apps(self) -> dict[int, str]:
@@ -166,7 +166,7 @@ class TestRevealWiring:
             def __init__(self, *_a, **_k) -> None:
                 self.redeemed: list[str] = []
 
-            def restore(self) -> bool:
+            def restore(self, account_name: str | None = None) -> bool:
                 return True
 
             def list_owned_apps(self) -> dict[int, str]:
@@ -226,7 +226,7 @@ class TestRevealWiring:
         )
         monkeypatch.setattr(
             "humble_steam_key_redeemer.cli._app.HumbleClient",
-            lambda _browser: _FakeHumbleClient(),
+            lambda _browser, _timeout=0: _FakeHumbleClient(),
         )
 
         result = runner.invoke(app, ["redeem", "--state-dir", str(state_dir), "--yes", "--reveal"])
@@ -266,7 +266,7 @@ class TestRevealRequiresHumbleSession:
         monkeypatch.setattr("humble_steam_key_redeemer.cli._app.HumbleBrowser", lambda _s: _FakeBrowserCtx())
         monkeypatch.setattr(
             "humble_steam_key_redeemer.cli._app.HumbleClient",
-            lambda _b: _FakeHumbleClient(logged_in=False),
+            lambda _b, _timeout=0: _FakeHumbleClient(logged_in=False),
         )
 
         result = runner.invoke(app, ["redeem", "--state-dir", str(state_dir), "--yes", "--reveal"])

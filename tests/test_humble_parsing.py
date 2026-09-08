@@ -105,3 +105,37 @@ class TestToKeyRecords:
     def test_entries_without_a_machine_name_are_ignored(self):
         payload = {"gamekey": "x", "tpkd_dict": {"all_tpks": [{"human_name": "No machine name"}]}}
         assert to_key_records([payload]) == []
+
+
+MULTI_KEY_ORDER = {
+    "gamekey": "order9",
+    "tpkd_dict": {
+        "all_tpks": [
+            {
+                "machine_name": "multi",
+                "human_name": "Multi Key Game",
+                "key_type": "steam",
+                "redeemed_key_val": ["AAAAA-BBBBB-CCCCC", "DDDDD-EEEEE-FFFFF"],
+            }
+        ]
+    },
+}
+
+
+class TestMultiKeyEntries:
+    """Each code in a multi-key entry is a separately redeemable product."""
+
+    def test_every_code_is_kept(self):
+        """Dropping the extras would silently lose redeemable keys."""
+        records = to_key_records([MULTI_KEY_ORDER])
+        assert sorted(r.redeemed_key_val for r in records) == [
+            "AAAAA-BBBBB-CCCCC",
+            "DDDDD-EEEEE-FFFFF",
+        ]
+
+    def test_each_code_gets_a_distinct_identity(self):
+        records = to_key_records([MULTI_KEY_ORDER])
+        assert len({r.machine_name for r in records}) == 2
+
+    def test_reimport_does_not_duplicate(self):
+        assert len(to_key_records([MULTI_KEY_ORDER, MULTI_KEY_ORDER])) == 2

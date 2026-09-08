@@ -88,7 +88,7 @@ def sync(
 
     try:
         with HumbleBrowser(settings) as browser:
-            client = HumbleClient(browser)
+            client = HumbleClient(browser, int(settings.request_timeout * 1000))
 
             if not client.is_logged_in():
                 if settings.headless:
@@ -129,7 +129,7 @@ def login(
     settings = _settings(state_dir, headless=False)
     try:
         with HumbleBrowser(settings) as browser:
-            client = HumbleClient(browser)
+            client = HumbleClient(browser, int(settings.request_timeout * 1000))
             browser.goto(HUMBLE_LOGIN_PAGE)
             console.print("Complete the Humble sign-in in the browser window.")
             typer.confirm("Press Enter once you are signed in", default=True, abort=False)
@@ -198,7 +198,10 @@ def redeem(
         return
 
     gateway = VendorFabricSteamGateway(settings)
-    if not gateway.restore():
+    # Restoring a session for a different account would run irreversible
+    # activations against the wrong library, so an explicit --steam-account
+    # must match the saved session before it is reused.
+    if not gateway.restore(account_name=account):
         if dry_run:
             error_console.print("[red]Steam sign-in required, even for --dry-run (ownership check).[/red]")
             raise typer.Exit(1)
@@ -208,6 +211,9 @@ def redeem(
         gateway.authenticate(
             SteamCredentials(account_name=account_name, password=password, steam_guard_code=code or None)
         )
+
+    # --limit overrides the configured safety cap; otherwise the cap applies.
+    effective_limit = limit or settings.max_redemptions_per_run
 
     with gateway:
         engine = RedemptionEngine(store, gateway)
@@ -245,7 +251,7 @@ def redeem(
             ):
                 raise typer.Abort
             with HumbleBrowser(settings) as browser:
-                humble = HumbleClient(browser)
+                humble = HumbleClient(browser, int(settings.request_timeout * 1000))
                 # A fresh page sits on about:blank. Revealing issues fetches
                 # that must run from the Humble origin to carry its session
                 # cookies, so navigate and confirm the session before starting.
@@ -257,7 +263,7 @@ def redeem(
                     raise typer.Exit(1)
                 summary = engine.redeem(
                     plan,
-                    limit=limit,
+                    limit=effective_limit,
                     on_result=_report,
                     reveal=_revealer(humble),
                 )
@@ -308,7 +314,7 @@ def _print_plan(plan: object) -> None:
     console.print(f"[bold]{len(attempts)}[/bold] to attempt, [bold]{len(skipped)}[/bold] skipped.")
 
     if uncertain:
-        table = Table(title="Skipped, but not certain you own these")
+        table = Table(title="Attempted anyway — a possible match we are not sure about")
         table.add_column("Humble title")
         table.add_column("Matched Steam app")
         table.add_column("Score", justify="right")

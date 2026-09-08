@@ -66,13 +66,15 @@ async (gamekeys) => {
 """
 
 _POST_FORM = """
-async ({ url, payload, csrf }) => {
+async ({ url, payload, csrf, timeoutMs }) => {
     const body = new FormData();
     for (const [key, value] of Object.entries(payload)) {
         body.append(key, value);
     }
     const headers = csrf ? { 'CSRF-Prevention-Token': csrf } : {};
-    const response = await fetch(url, { method: 'POST', headers, body });
+    const response = await fetch(url, {
+        method: 'POST', headers, body, signal: AbortSignal.timeout(timeoutMs),
+    });
     let parsed = null;
     try { parsed = await response.json(); } catch (error) { parsed = null; }
     return { status: response.status, body: parsed };
@@ -91,8 +93,9 @@ class HumbleClient:
         browser: A started :class:`~humble_steam_key_redeemer.humble.HumbleBrowser`.
     """
 
-    def __init__(self, browser: HumbleBrowser) -> None:
+    def __init__(self, browser: HumbleBrowser, timeout_ms: int = 30_000) -> None:
         self._browser = browser
+        self._timeout_ms = timeout_ms
 
     def is_logged_in(self) -> bool:
         """Report whether the session is signed in to Humble.
@@ -152,7 +155,12 @@ class HumbleClient:
         """
         result = self._browser.evaluate(
             _POST_FORM,
-            {"url": url, "payload": payload, "csrf": self._browser.cookie("csrf_cookie") or ""},
+            {
+                "url": url,
+                "payload": payload,
+                "csrf": self._browser.cookie("csrf_cookie") or "",
+                "timeoutMs": self._timeout_ms,
+            },
         )
         return int(result["status"]), result["body"]
 
@@ -251,27 +259,35 @@ def to_key_records(orders: list[dict[str, Any]]) -> list[KeyRecord]:
             if not machine_name:
                 continue
 
-            key_value = entry.get("redeemed_key_val")
-            # Multi-key entries report a list rather than a single string.
-            if isinstance(key_value, list):
-                key_value = next((str(item) for item in key_value if item), None)
-            elif key_value is not None and not isinstance(key_value, str):
-                key_value = None
+            raw_value = entry.get("redeemed_key_val")
+            # A multi-key entry reports a list. Each code is a separate
+            # redeemable product, so each becomes its own record rather than
+            # all but the first being discarded.
+            if isinstance(raw_value, list):
+                key_values: list[str | None] = [str(item) for item in raw_value if item] or [None]
+            elif isinstance(raw_value, str) and raw_value:
+                key_values = [raw_value]
+            else:
+                key_values = [None]
 
             app_id = entry.get("steam_app_id")
-            record = KeyRecord(
-                gamekey=str(entry.get("gamekey") or gamekey),
-                machine_name=machine_name,
-                human_name=str(entry.get("human_name", machine_name)),
-                key_type=str(entry.get("key_type") or "").lower() or None,
-                steam_app_id=_as_app_id(app_id),
-                redeemed_key_val=key_value,
-                key_index=entry.get("keyindex"),
-                is_gift=bool(entry.get("is_gift")),
-                is_expired=bool(entry.get("is_expired")),
-                state=KeyState.REVEALED if key_value else KeyState.UNREVEALED,
-            )
-            records[(record.gamekey, record.machine_name)] = record
+            for offset, key_value in enumerate(key_values):
+                # Multi-key entries share a machine_name, so the suffix keeps
+                # each code a distinct row rather than overwriting the last.
+                name = machine_name if offset == 0 else f"{machine_name}#{offset}"
+                record = KeyRecord(
+                    gamekey=str(entry.get("gamekey") or gamekey),
+                    machine_name=name,
+                    human_name=str(entry.get("human_name", machine_name)),
+                    key_type=str(entry.get("key_type") or "").lower() or None,
+                    steam_app_id=_as_app_id(app_id),
+                    redeemed_key_val=key_value,
+                    key_index=entry.get("keyindex"),
+                    is_gift=bool(entry.get("is_gift")),
+                    is_expired=bool(entry.get("is_expired")),
+                    state=KeyState.REVEALED if key_value else KeyState.UNREVEALED,
+                )
+                records[(record.gamekey, record.machine_name)] = record
 
     return list(records.values())
 

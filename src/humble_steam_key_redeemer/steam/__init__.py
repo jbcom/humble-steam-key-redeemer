@@ -12,6 +12,7 @@ from humble_steam_key_redeemer.steam._gateway import (
     VendorFabricSteamGateway,
     load_session,
     save_session,
+    session_account,
 )
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "VendorFabricSteamGateway",
     "load_session",
     "save_session",
+    "session_account",
 ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import os
 
 import pytest
 
@@ -129,3 +130,16 @@ class TestCsvSafety:
         with destination.open(encoding="utf-8-sig", newline="") as handle:
             rows = list(csv.reader(handle))
         assert len(rows) == 2  # header plus the single Steam key
+
+
+class TestExportPermissions:
+    def test_the_export_is_owner_only(self, store, tmp_path):
+        """An export can contain revealed, unredeemed keys."""
+        store.upsert_keys([_key(redeemed_key_val="AAAAA-BBBBB-CCCCC")])
+        old = os.umask(0)
+        try:
+            destination = store.export_csv(tmp_path / "keys.csv")
+        finally:
+            os.umask(old)
+
+        assert destination.stat().st_mode & 0o077 == 0

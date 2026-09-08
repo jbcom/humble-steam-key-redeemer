@@ -147,15 +147,26 @@ class OwnershipMatcher:
             score_cutoff=self._threshold,
             limit=limit,
         )
-        return [
+        # Report the same refined score `match()` uses. token_set_ratio alone
+        # rates a subset as perfect ("Portal" against "Portal 2"), which would
+        # present a false candidate as confident.
+        decisions = [
             MatchDecision(
                 app_id=self._app_ids[index],
                 app_name=name,
-                score=int(score),
-                confident=int(score) >= self._confirm_threshold,
+                score=int(fuzz.token_sort_ratio(title, name, processor=utils.default_process)),
+                confident=False,
             )
-            for name, score, index in results
+            for name, _score, index in results
         ]
+        return sorted(
+            (
+                MatchDecision(d.app_id, d.app_name, d.score, d.score >= self._confirm_threshold)
+                for d in decisions
+            ),
+            key=lambda d: d.score,
+            reverse=True,
+        )
 
 
 __all__ = ["MatchDecision", "OwnershipMatcher"]

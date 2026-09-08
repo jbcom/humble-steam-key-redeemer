@@ -8,6 +8,7 @@ been tried, and what did Steam say?
 from __future__ import annotations
 
 import csv
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -250,7 +251,11 @@ class RedeemerStore:
 
         destination = Path(destination)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        with destination.open("w", encoding="utf-8-sig", newline="") as handle:
+        # The report can contain revealed, unredeemed keys, which are bearer
+        # credentials: anyone who can read the file can activate them. Create
+        # it owner-only instead of inheriting a permissive umask.
+        fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8-sig", newline="") as handle:
             writer = csv.writer(handle)
             writer.writerow(columns)
             for key in keys:

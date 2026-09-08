@@ -95,3 +95,37 @@ class TestGatewayOperations:
         with VendorFabricSteamGateway(settings, connector):
             pass
         assert connector.closed
+
+
+class TestAccountScopedRestore:
+    """Activations are irreversible, so the wrong account must never be used."""
+
+    def test_a_session_for_another_account_is_not_reused(self, settings):
+        save_session(
+            SteamSession(steam_id="1", access_token="a", refresh_token="r"),
+            settings.steam_session_path,
+            "alice",
+        )
+        gateway = VendorFabricSteamGateway(settings, FakeConnector())
+
+        assert not gateway.restore(account_name="bob")
+
+    def test_a_matching_account_is_reused(self, settings):
+        save_session(
+            SteamSession(steam_id="1", access_token="a", refresh_token="r"),
+            settings.steam_session_path,
+            "alice",
+        )
+        gateway = VendorFabricSteamGateway(settings, FakeConnector())
+
+        assert gateway.restore(account_name="Alice")  # case-insensitive
+
+    def test_no_requested_account_reuses_any_session(self, settings):
+        save_session(
+            SteamSession(steam_id="1", access_token="a", refresh_token="r"),
+            settings.steam_session_path,
+            "alice",
+        )
+        gateway = VendorFabricSteamGateway(settings, FakeConnector())
+
+        assert gateway.restore()

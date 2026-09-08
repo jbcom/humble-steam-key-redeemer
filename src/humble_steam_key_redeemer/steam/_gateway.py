@@ -29,7 +29,7 @@ class SteamCredentials:
     steam_guard_code: str | None = None
 
 
-def save_session(session: SteamSession, path: Path) -> Path:
+def save_session(session: SteamSession, path: Path, account_name: str | None = None) -> Path:
     """Persist a Steam session to disk.
 
     The session tokens are bearer credentials that survive Steam Guard, so the
@@ -38,6 +38,8 @@ def save_session(session: SteamSession, path: Path) -> Path:
     Args:
         session: The session to store.
         path: Destination path.
+        account_name: Account the session belongs to, so a later run can tell
+            whether a saved session matches the account being asked for.
 
     Returns:
         The path written.
@@ -50,12 +52,30 @@ def save_session(session: SteamSession, path: Path) -> Path:
                 "access_token": session.access_token,
                 "refresh_token": session.refresh_token,
                 "cookies": session.cookies,
+                "account_name": account_name,
             }
         ),
         encoding="utf-8",
     )
     path.chmod(0o600)
     return path
+
+
+def session_account(path: Path) -> str | None:
+    """Return the account name a saved session belongs to, if recorded.
+
+    Args:
+        path: Session file path.
+
+    Returns:
+        The account name, or ``None`` when absent or unreadable.
+    """
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    name = payload.get("account_name")
+    return str(name) if isinstance(name, str) and name else None
 
 
 def load_session(path: Path) -> SteamSession | None:
@@ -102,8 +122,13 @@ class VendorFabricSteamGateway:
         """The underlying vendor-fabric connector."""
         return self._connector
 
-    def restore(self) -> bool:
+    def restore(self, account_name: str | None = None) -> bool:
         """Reuse a saved session when one is still valid.
+
+        Args:
+            account_name: When given, the saved session is only reused if it
+                belongs to this account. Activations are irreversible, so a
+                session for a different account must never be used silently.
 
         Returns:
             ``True`` when an existing session was restored and accepted.
@@ -111,6 +136,11 @@ class VendorFabricSteamGateway:
         session = load_session(self._settings.steam_session_path)
         if session is None:
             return False
+
+        if account_name is not None:
+            saved = session_account(self._settings.steam_session_path)
+            if saved is not None and saved.casefold() != account_name.casefold():
+                return False
         self._connector.restore_session(session)
         if self._connector.is_authenticated():
             return True
@@ -132,7 +162,7 @@ class VendorFabricSteamGateway:
         )
         session = connector.authenticate()
         self._connector = connector
-        save_session(session, self._settings.steam_session_path)
+        save_session(session, self._settings.steam_session_path, credentials.account_name)
 
     # ----------------------------------------------------- SteamGateway API
 
@@ -180,4 +210,5 @@ __all__ = [
     "VendorFabricSteamGateway",
     "load_session",
     "save_session",
+    "session_account",
 ]
