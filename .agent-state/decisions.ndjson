@@ -1,1 +1,2 @@
 {"ts":"2026-09-08T12:29:48.140Z","sha":"db5062d8c701fe01659f123f56fa5b91525a3c9c","subject":"Merge pull request #1 from jbcom/fix/operational-and-security","decision":null,"why":null,"resolves":[],"overrides":[],"source":"gh-pr-merge"}
+{"ts":"2026-09-08T12:31:42.014Z","sha":"96e89014ec4c919f7bead8dc3b755f09435d9f34","subject":"Merge pull request #2 from jbcom/chore/untrack-agent-state","decision":null,"why":null,"resolves":[],"overrides":[],"source":"gh-pr-merge"}
