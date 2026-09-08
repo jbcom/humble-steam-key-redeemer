@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self
+from urllib.parse import urlparse
 
 from playwright.sync_api import Browser, BrowserContext, Page, sync_playwright
 
@@ -30,9 +31,40 @@ if TYPE_CHECKING:
     from humble_steam_key_redeemer.settings import Settings
 
 
+HUMBLE_DOMAIN = "humblebundle.com"
+
 HUMBLE_LOGIN_PAGE = "https://www.humblebundle.com/login"
 HUMBLE_LIBRARY_PAGE = "https://www.humblebundle.com/home/library"
 HUMBLE_SUBSCRIPTION_PAGE = "https://www.humblebundle.com/subscription/"
+
+
+def _is_humble_host(host: str) -> bool:
+    """Whether a hostname is Humble's own.
+
+    Checked as a host rather than as a substring: `humblebundle.com` appears
+    inside `humblebundle.com.example.net` too, and treating that as Humble
+    would copy an unrelated site's cookies into the session file.
+
+    Args:
+        host: A hostname, optionally with a leading dot as cookies use.
+
+    Returns:
+        Whether the host is `humblebundle.com` or a subdomain of it.
+    """
+    host = host.lstrip(".").lower()
+    return host == HUMBLE_DOMAIN or host.endswith(f".{HUMBLE_DOMAIN}")
+
+
+def _is_humble_url(url: str) -> bool:
+    """Whether a URL points at Humble.
+
+    Args:
+        url: The URL to test.
+
+    Returns:
+        Whether its host is Humble's.
+    """
+    return _is_humble_host(urlparse(url).hostname or "")
 
 
 class HumbleBrowserError(RuntimeError):
@@ -134,7 +166,7 @@ class HumbleBrowser:
         # whatever the person was doing in it.
         self._page = (
             next(
-                (page for page in self._context.pages if "humblebundle.com" in page.url),
+                (page for page in self._context.pages if _is_humble_url(page.url)),
                 None,
             )
             or self._context.new_page()
@@ -176,10 +208,10 @@ class HumbleBrowser:
         state = self._require_context().storage_state()
 
         state["cookies"] = [
-            cookie for cookie in state.get("cookies", []) if "humblebundle.com" in cookie.get("domain", "")
+            cookie for cookie in state.get("cookies", []) if _is_humble_host(cookie.get("domain", ""))
         ]
         state["origins"] = [
-            origin for origin in state.get("origins", []) if "humblebundle.com" in origin.get("origin", "")
+            origin for origin in state.get("origins", []) if _is_humble_url(origin.get("origin", ""))
         ]
 
         # Written through a private descriptor rather than written and then
