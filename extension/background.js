@@ -370,4 +370,17 @@ function connectToHost() {
 // without anyone opening the popup.
 chrome.runtime.onStartup.addListener(connectToHost);
 chrome.runtime.onInstalled.addListener(connectToHost);
+
+// An open native port keeps the service worker alive, but nothing revives it
+// once that port drops — hskr exited, Chrome restarted, or the worker was
+// terminated before it ever connected. An alarm is the only wake-up a
+// terminated service worker still gets, so it is what makes an agent's
+// instruction land on a browser nobody has touched today.
+const RECONNECT_ALARM = "hskr-reconnect";
+
+chrome.alarms.create(RECONNECT_ALARM, { periodInMinutes: 1 });
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === RECONNECT_ALARM) connectToHost();
+});
+
 connectToHost();

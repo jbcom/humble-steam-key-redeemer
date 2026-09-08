@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "Drives Humble Bundle and Steam in the tabs you are already signed into, and reports to the hskr command-line tool.",
   "permissions": [
+    "alarms",
     "nativeMessaging",
     "scripting",
     "tabs"
