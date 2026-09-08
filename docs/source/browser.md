@@ -43,6 +43,14 @@ extension can reach this tool at all.
 
 Reload the extension afterwards.
 
+```{note}
+Chrome derives an unpacked extension's ID from the directory it was loaded
+from, so the ID survives reloads but **changes if you move or re-clone the
+repository**. When that happens the host no longer names the extension Chrome
+is running, and `hskr browser` reports that the browser did not respond. Copy
+the new ID and run `hskr bridge --extension-id <ID>` again.
+```
+
 ## Drive it from the command line
 
 ```bash

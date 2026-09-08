@@ -393,7 +393,10 @@ def run_command(
     if reply is None:
         raise BridgeError(
             "The browser did not respond. Check that Chrome is running with the "
-            "extension enabled, and that `hskr bridge --extension-id <ID>` has been run."
+            "extension enabled, and that `hskr bridge --extension-id <ID>` has been "
+            "run. Chrome derives an unpacked extension's id from the directory it "
+            "was loaded from, so moving or re-cloning the repository changes it and "
+            "the registration has to be redone."
         )
     return reply
 
