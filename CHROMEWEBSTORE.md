@@ -106,9 +106,10 @@ These are the blockers for an actual submission.
 
 - [x] **Icon, 128×128 PNG.** Done — `extension/icons/` carries 16, 32, 48, and
       128px, each drawn at its own size and checked for legibility at 16px.
-- [ ] **At least one screenshot, 1280×800 or 640×400.** The popup mid-run is the
-      obvious one; a preview result showing what it would skip makes the value
-      legible without a paragraph of text.
+- [x] **At least one screenshot, 1280×800.** Done —
+      `docs/source/_static/popup-preview.png` shows a finished preview: two keys
+      worth attempting against 214 skipped, which is the whole argument for the
+      tool in one line.
 - [ ] **A developer account.** One-time 5 USD registration fee, which is a
       spending decision rather than something to action here.
 

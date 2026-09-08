@@ -73,6 +73,14 @@ says so rather than hanging.
 The extension's toolbar button opens a popup with the same actions. It is the
 same work with a person driving it, and it reports the same summaries.
 
+```{image} _static/popup-preview.png
+:alt: The popup after a preview, showing two keys worth attempting and 214 skipped
+:width: 320px
+```
+
+Redeeming arms on the first click and runs on the second, because it cannot be
+undone.
+
 ## How a command reaches the browser
 
 Chrome starts a native host itself and owns both ends of its pipes, so a

@@ -35,7 +35,10 @@ function report(reply) {
       if (reply.uncertain?.length) {
         lines.push("", "Not certain you own these:");
         for (const item of reply.uncertain) {
-          lines.push(`  ? ${item.title} → ${item.matched ?? "?"}`);
+          // The match goes on its own line: an arrow that wraps leaves the
+          // matched title looking like a separate entry.
+          lines.push(`  ? ${item.title}`);
+          lines.push(`      matched: ${item.matched ?? "unknown"}`);
         }
       }
       outputEl.textContent = lines.join("\n");
