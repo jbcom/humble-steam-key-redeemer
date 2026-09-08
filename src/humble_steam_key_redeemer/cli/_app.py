@@ -453,7 +453,9 @@ def bridge(
 
     manifest = install_manifest(extension_id)
     console.print(f"Registered native messaging host at [bold]{manifest}[/bold].")
-    console.print("Reload the extension in chrome://extensions, then use its toolbar button.")
+    console.print("Reload the extension in chrome://extensions, then either:\n")
+    console.print("  [bold]hskr browser sync[/bold]   drive it from here, no clicking")
+    console.print("  the toolbar button      the same work, with a person driving it")
 
 
 @app.command()

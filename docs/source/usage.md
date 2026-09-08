@@ -54,6 +54,23 @@ hskr export steam-only.csv --steam-only
 Values that a spreadsheet would treat as formulas are escaped, and titles
 containing commas, quotes, or newlines are quoted correctly.
 
+### `hskr browser`
+
+Drives the Chrome extension, so the work happens in the browser you are
+already signed into. See [The Chrome extension](browser.md).
+
+```bash
+hskr browser status
+hskr browser sync
+hskr browser preview
+hskr browser redeem --reveal
+```
+
+### `hskr bridge`
+
+Sets up that extension. `hskr bridge` prints the install steps; `hskr bridge
+--extension-id <ID>` registers the native messaging host.
+
 ### `hskr logout`
 
 Deletes the saved Humble and Steam sessions.

@@ -36,6 +36,28 @@ hskr export library.csv --steam-only
 > permanently. The tool never reveals anything unless you pass `--reveal`, and
 > even then only for keys it is about to redeem.
 
+## Or use the Chrome you are already signed into
+
+The commands above launch their own browser, which means a second sign-in in a
+profile Humble and Steam both treat as a new device. The bundled Chrome
+extension instead drives the tabs you are already signed into.
+
+```bash
+hskr bridge                          # prints the install steps
+hskr bridge --extension-id <ID>      # register the native messaging host
+
+hskr browser sync                    # import the library
+hskr browser preview                 # what would be redeemed
+hskr browser redeem                  # redeem it
+```
+
+Nobody has to click anything, so a script or an agent can run these. The
+extension's toolbar button does the same work with a person driving it.
+
+The extension only fetches and posts; ownership matching, rate-limit handling,
+and the decision of what is worth redeeming all stay in `hskr`. See
+[the documentation](https://jonbogaty.com/humble-steam-key-redeemer/browser.html).
+
 ## How it works
 
 **Humble** publishes no API for library access, so that half drives a real

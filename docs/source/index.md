@@ -22,6 +22,7 @@ succeed.
 
 getting-started
 usage
+browser
 design
 security
 api/index
