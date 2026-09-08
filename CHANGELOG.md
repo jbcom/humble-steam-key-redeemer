@@ -1,5 +1,41 @@
 # Changelog
 
+## [1.1.0](https://github.com/jbcom/humble-steam-key-redeemer/compare/humble-steam-key-redeemer-v1.0.0...humble-steam-key-redeemer-v1.1.0) (2026-09-08)
+
+
+### Features
+
+* drive Humble and Steam from the browser you are signed into ([c6b1dcd](https://github.com/jbcom/humble-steam-key-redeemer/commit/c6b1dcd24b4e4bba7652a5286542ba1c88a0c358))
+* drive Humble and Steam from the browser you are signed into ([3471bac](https://github.com/jbcom/humble-steam-key-redeemer/commit/3471bacdd152e7b6197b6c24593649c45a144c85))
+* drive the extension from the command line, with no popup ([6fc77aa](https://github.com/jbcom/humble-steam-key-redeemer/commit/6fc77aaa2268f8f2af42fd24b36a985acde91228))
+* give the extension an icon, and write the store listing ([bd44535](https://github.com/jbcom/humble-steam-key-redeemer/commit/bd44535ef45c03487d1aea0879670113ec20fe37))
+* screenshot the popup, and stop a match wrapping into a new entry ([a1f4e79](https://github.com/jbcom/humble-steam-key-redeemer/commit/a1f4e79b1833361b30cbec7ee9c20a05f06dc368))
+
+
+### Bug Fixes
+
+* a reveal that fails in transit skips one key, not the run ([be71c06](https://github.com/jbcom/humble-steam-key-redeemer/commit/be71c064ce8a049b5e90988e31ca4189ed204b74))
+* address review findings on the bridge and login paths ([e201c1f](https://github.com/jbcom/humble-steam-key-redeemer/commit/e201c1fc161d3fe897b2278dd79e0f3bb4ee5fa6))
+* claim a queued request atomically ([c6ca0a5](https://github.com/jbcom/humble-steam-key-redeemer/commit/c6ca0a5168499fbcc29058c004b9bed1ce211dde))
+* dead Steam endpoint, missed rate limit, and Windows registration ([7be6c36](https://github.com/jbcom/humble-steam-key-redeemer/commit/7be6c3621640d45ff6297ceadb5a12a4f743739b))
+* do not let a branch name bypass the only required check ([523aa12](https://github.com/jbcom/humble-steam-key-redeemer/commit/523aa12c6b1e134c036fdbb4b0102141db0dd691))
+* do not strand an agent when the browser goes away ([a5ff6eb](https://github.com/jbcom/humble-steam-key-redeemer/commit/a5ff6eb7ca709ee53d69c241d0428fb9340785de))
+* judge Humble by host, not by substring ([577a91c](https://github.com/jbcom/humble-steam-key-redeemer/commit/577a91c40fc7b16d1bfc47fe94680d50f76cb715))
+* keep product keys out of the page's own JavaScript ([96b7c40](https://github.com/jbcom/humble-steam-key-redeemer/commit/96b7c404c9ddbca8b2c521ab912697fb67641493))
+* message limits, a missing verdict, CDP scope, and the popup's redeem ([2131a7e](https://github.com/jbcom/humble-steam-key-redeemer/commit/2131a7e3a8b763fd8f8dc9125a35b1cae87c0800))
+* one failed key must not abandon the whole redemption run ([64aa6ca](https://github.com/jbcom/humble-steam-key-redeemer/commit/64aa6ca84d5c9ffd33e050b70b2bac08ea1510d8))
+* report the counts that explain why a browser run did nothing ([af769a3](https://github.com/jbcom/humble-steam-key-redeemer/commit/af769a31690eba7790ee6c2769335a7d78a6fbd1))
+* revive the native port after the service worker is terminated ([fb84cbe](https://github.com/jbcom/humble-steam-key-redeemer/commit/fb84cbe7fc6a32f63cf4b9cf1c7b7f72c3ba953e))
+* run sign-in checks in the page, and drop unused permissions ([6ad50c7](https://github.com/jbcom/humble-steam-key-redeemer/commit/6ad50c7582f130c577c88de6225c4056b0abb35f))
+* the manifest test modelled the bug it exists to prevent ([3989390](https://github.com/jbcom/humble-steam-key-redeemer/commit/39893900b22bf411156ba7bde57fdaa8ce63ded4))
+
+
+### Documentation
+
+* describe driving the browser from the command line ([1e441cb](https://github.com/jbcom/humble-steam-key-redeemer/commit/1e441cb6d4667067146f9a32f1535c54301d9e0e))
+* say why the extension id changes, where people hit it ([abb26a2](https://github.com/jbcom/humble-steam-key-redeemer/commit/abb26a24112cab6ab6e959fabb94154290842cf8))
+* state the safety guarantees the browser path now carries ([7efcc1a](https://github.com/jbcom/humble-steam-key-redeemer/commit/7efcc1a0ad36b3a6e19586358121d661634b4646))
+
 ## [1.0.0](https://github.com/jbcom/humble-steam-key-redeemer/compare/humble-steam-key-redeemer-v1.0.0...humble-steam-key-redeemer-v1.0.0) (2026-09-08)
 
 
