@@ -19,6 +19,12 @@ jobs:
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:
+          # GitHub suppresses workflow runs for events caused by GITHUB_TOKEN,
+          # so a release PR opened with it never runs CI and can never satisfy
+          # a required check. A PAT triggers them normally; this falls back to
+          # the default token where the secret is not configured, which still
+          # opens the PR but leaves CI to be started by hand.
+          token: ${{ secrets.CI_GITHUB_TOKEN || github.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
       - name: Enroll release pull requests for merge

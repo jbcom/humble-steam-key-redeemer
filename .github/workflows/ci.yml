@@ -84,7 +84,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       EVENT_NAME: ${{ github.event_name }}
-      SKIP_AUTOMATED_PR_VALIDATION: ${{ github.event_name == 'pull_request' && startsWith(github.head_ref, 'release-please--') }}
+      # Gated on the PR's author, not its branch name. A contributor chooses
+      # their own branch name, so `startsWith(head_ref, 'release-please--')`
+      # would let anyone skip the only required check by naming a branch. The
+      # author is the release-please app and cannot be forged.
+      SKIP_AUTOMATED_PR_VALIDATION: ${{ github.event_name == 'pull_request' && github.event.pull_request.user.login == 'github-actions[bot]' && startsWith(github.head_ref, 'release-please--') }}
       LINT_RESULT: ${{ needs.lint.result }}
       TYPECHECK_RESULT: ${{ needs.typecheck.result }}
       TEST_RESULT: ${{ needs.test.result }}
@@ -105,8 +109,10 @@ jobs:
             "$DOCS_RESULT"
             "$BUILD_RESULT"
           )
+          # "skipped" is accepted so a job legitimately gated off does not
+          # fail the run; "failure" and "cancelled" are not.
           for result in "${required[@]}"; do
-            if [[ "$result" != "success" ]]; then
+            if [[ "$result" != "success" && "$result" != "skipped" ]]; then
               echo "A required CI job did not succeed: $result" >&2
               exit 1
             fi
