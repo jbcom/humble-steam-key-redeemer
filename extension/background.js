@@ -169,14 +169,33 @@ async function readOwnedApps() {
       const owned = new Set(userdata.rgOwnedApps ?? []);
       if (owned.size === 0) return { apps: {} };
 
-      const list = await (
-        await fetch("https://api.steampowered.com/ISteamApps/GetAppList/v2/")
-      ).json();
-
+      // Names come from the account's own games list rather than a public
+      // catalogue: `ISteamApps/GetAppList` was withdrawn and now returns 404,
+      // and the replacement wants an API key this tool deliberately does not
+      // have. This page is one request and it is already authenticated.
+      //
+      // Ownership by app id alone is enough whenever Humble supplied one; the
+      // names are for the fuzzy title fallback, so an id with no name still
+      // counts as owned.
       const apps = {};
-      for (const app of list.applist?.apps ?? []) {
-        if (owned.has(app.appid) && app.name) apps[app.appid] = app.name;
+      for (const id of owned) apps[id] = "";
+
+      try {
+        const games = await fetch("https://steamcommunity.com/my/games/?tab=all&xml=1", {
+          credentials: "include",
+        });
+        if (games.ok) {
+          const xml = await games.text();
+          const pattern = /<appID>(\d+)<\/appID>\s*<name><!\[CDATA\[([\s\S]*?)\]\]><\/name>/g;
+          for (const [, id, name] of xml.matchAll(pattern)) {
+            if (owned.has(Number(id))) apps[Number(id)] = name.trim();
+          }
+        }
+      } catch {
+        // Names are an optimisation for fuzzy matching. Without them the app
+        // ids still answer ownership for every key Humble tagged.
       }
+
       return { apps };
     } catch (error) {
       return { error: String(error.message || error) };
@@ -326,7 +345,13 @@ async function redeem({ reveal = false } = {}) {
       continue;
     }
 
-    const detail = outcome.body.purchase_result_details ?? null;
+    // Steam reports the code in either place depending on the response shape.
+    // Reading only the top-level one means missing a rate limit and carrying
+    // on submitting, which extends the cooldown rather than ending the run.
+    const detail =
+      outcome.body.purchase_result_details ??
+      outcome.body.purchase_receipt_info?.result_detail ??
+      null;
     results.push({ id: entry.id, key, status: outcome.status, result: outcome.body });
 
     // Report progress as it happens rather than only at the end.

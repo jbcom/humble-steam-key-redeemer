@@ -577,6 +577,28 @@ def _manifest_directory() -> Path:
     return home / ".config/google-chrome/NativeMessagingHosts"
 
 
+def _register_with_windows_registry(manifest_path: Path) -> None:
+    """Point Chrome at the manifest, on Windows.
+
+    Windows Chrome finds native hosts through the registry rather than by
+    scanning a directory, so writing the JSON alone registers nothing there.
+
+    Args:
+        manifest_path: The manifest file Chrome should read.
+    """
+    if sys.platform != "win32":
+        return
+
+    # Windows only. Type checkers running elsewhere correctly call the rest of
+    # this function unreachable, and `winreg`'s attributes are declared to
+    # exist only on Windows, so the block is skipped rather than mis-checked.
+    import winreg  # type: ignore[unreachable] # noqa: PLC0415 # pragma: no cover
+
+    key_path = rf"Software\Google\Chrome\NativeMessagingHosts\{NATIVE_HOST_NAME}"
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key_path) as key:
+        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, str(manifest_path))
+
+
 def install_manifest(
     extension_id: str,
     executable: str | None = None,
@@ -599,6 +621,8 @@ def install_manifest(
     """
     directory = _manifest_directory()
     directory.mkdir(parents=True, exist_ok=True)
+
+    _register_with_windows_registry(directory / f"{NATIVE_HOST_NAME}.json")
 
     manifest = {
         "name": NATIVE_HOST_NAME,
@@ -633,6 +657,18 @@ def _default_executable(settings: Settings | None = None) -> str:
     """
     settings = settings or Settings()
     settings.ensure_state_dir()
+
+    if sys.platform == "win32":  # pragma: no cover - Windows only
+        # Chrome runs this directly, and Windows cannot execute a shell script.
+        launcher = settings.state_dir / "hskr-native-host.bat"
+        launcher.write_text(
+            "@echo off\r\n"
+            f'set "HSKR_STATE_DIR={settings.state_dir}"\r\n'
+            f'"{sys.executable}" -m humble_steam_key_redeemer.bridge %*\r\n',
+            encoding="utf-8",
+        )
+        return str(launcher)
+
     launcher = settings.state_dir / "hskr-native-host"
     launcher.write_text(
         "#!/bin/sh\n"

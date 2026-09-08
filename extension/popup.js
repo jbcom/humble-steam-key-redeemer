@@ -39,15 +39,22 @@ async function send(action) {
   buttons.forEach((button) => (button.disabled = true));
   show("Working…");
 
-  const response = await chrome.runtime.sendMessage({ action });
-  if (response?.ok && response.reply?.ok !== false) {
-    show("Done.", "ok");
-    report(response.reply);
-  } else {
-    show(response?.error ?? response?.reply?.error ?? "Something went wrong.", "bad");
+  try {
+    const response = await chrome.runtime.sendMessage({ action });
+    if (response?.ok && response.reply?.ok !== false) {
+      show("Done.", "ok");
+      report(response.reply);
+    } else {
+      show(response?.error ?? response?.reply?.error ?? "Something went wrong.", "bad");
+    }
+  } catch (error) {
+    // Delivery itself can fail — a terminated service worker, a closed port —
+    // and that rejects rather than returning {ok: false}.
+    show(String(error.message || error), "bad");
+  } finally {
+    // Always, or a failure leaves the popup stuck on "Working…" for good.
+    buttons.forEach((button) => (button.disabled = false));
   }
-
-  buttons.forEach((button) => (button.disabled = false));
 }
 
 (async () => {

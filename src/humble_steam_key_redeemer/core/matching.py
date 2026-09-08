@@ -59,7 +59,11 @@ class OwnershipMatcher:
         self._threshold = threshold
         self._confirm_threshold = confirm_threshold
         # rapidfuzz matches against a parallel list, so keep ids aligned.
-        self._app_ids = list(self._owned)
+        #
+        # An app whose name is unknown still answers ownership by id, which is
+        # authoritative when Humble supplied one. It is left out of the fuzzy
+        # candidates because there is nothing to compare a title against.
+        self._app_ids = [app_id for app_id, name in self._owned.items() if name]
         self._names = [self._owned[app_id] for app_id in self._app_ids]
 
     def match(self, title: str, *, steam_app_id: int | None = None) -> MatchDecision:
