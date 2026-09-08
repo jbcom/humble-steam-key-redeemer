@@ -43,14 +43,18 @@ async function tabFor(urlPrefix) {
  * being interpolated into source, so a title or key containing a quote is
  * inert data rather than executable text.
  */
-async function inPage(tabId, fn, args = []) {
+async function inPage(tabId, fn, args = [], { throwOnError = true } = {}) {
   const [result] = await chrome.scripting.executeScript({
     target: { tabId },
     world: "ISOLATED",
     func: fn,
     args,
   });
-  if (result?.result?.error) throw new Error(result.result.error);
+  // Reads abort the run when they fail, because everything after depends on
+  // them. A single redemption does not: the run may already have spent
+  // activations, and losing their verdicts to one bad request would be worse
+  // than skipping the key. Those callers ask for the error instead.
+  if (throwOnError && result?.result?.error) throw new Error(result.result.error);
   return result?.result;
 }
 
@@ -232,6 +236,9 @@ async function redeemKey(key) {
       }
     },
     [key],
+    // A failure here is one key's problem. Throwing would abandon the run and
+    // lose the verdicts already recorded for the keys before it.
+    { throwOnError: false },
   );
 }
 
