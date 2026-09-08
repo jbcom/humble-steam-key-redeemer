@@ -69,12 +69,14 @@ class TestPermissions:
     def test_every_origin_fetched_is_permitted(self, manifest, background):
         """A cross-origin fetch from an isolated world needs the grant."""
         hosts = {
-            re.sub(r"^https://", "", pattern).split("/")[0].lstrip("*.")
+            pattern.removeprefix("https://").split("/")[0].removeprefix("*.")
             for pattern in manifest["host_permissions"]
         }
 
         for url in re.findall(r'fetch\(\s*"(https://[^"]+)"', background):
-            host = url.split("/")[2]
+            # Split the host out and compare it whole. A substring test would
+            # let "store.steampowered.com.attacker.net" pass as permitted.
+            host = url.removeprefix("https://").split("/")[0]
             assert any(host == h or host.endswith(f".{h}") for h in hosts), url
 
     def test_nothing_is_declared_that_is_never_used(self, manifest, background):
@@ -111,6 +113,12 @@ class TestManifestV3:
 
     def test_no_origin_is_broader_than_the_sites_it_drives(self, manifest):
         """A wildcard host is the fastest way to fail store review."""
+        # Compared as hosts, not as substrings: "humblebundle.com" is inside
+        # "humblebundle.com.example.net" too, and a test that accepted that
+        # would be modelling the very bug it exists to prevent.
+        allowed = {"humblebundle.com", "store.steampowered.com", "steamcommunity.com"}
+
         for pattern in manifest["host_permissions"]:
             assert pattern.startswith("https://"), pattern
-            assert "humblebundle.com" in pattern or "steam" in pattern, pattern
+            host = pattern.removeprefix("https://").split("/")[0].removeprefix("*.")
+            assert host in allowed, pattern
