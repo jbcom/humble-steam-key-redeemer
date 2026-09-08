@@ -51,10 +51,25 @@ jobs:
         with:
           enable-cache: true
       - run: uvx --from tox --with tox-uv tox -e docs
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-pages-artifact@v3
         with:
-          name: docs
           path: docs/build/html
+
+  deploy-docs:
+    # The project metadata advertises a documentation URL, so the site has to
+    # actually exist. Only main publishes; pull requests build to verify.
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    needs: [docs, lint, typecheck, test]
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
 
   build:
     runs-on: ubuntu-latest
