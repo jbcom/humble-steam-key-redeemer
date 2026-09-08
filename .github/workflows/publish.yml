@@ -1,0 +1,53 @@
+name: Publish
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish
+        required: true
+        type: string
+
+permissions: {}
+
+jobs:
+  verify:
+    name: Verify before publishing
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      # A release is irreversible on PyPI, so the full gate runs against the
+      # exact tag being published rather than trusting an earlier main build.
+      - run: uvx --from tox --with tox-uv tox -e lint,typecheck,py312,docs
+
+  publish:
+    name: Publish to PyPI
+    needs: [verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Trusted publishing: no API token is stored anywhere. The PyPI trusted
+      # publisher must be registered WITHOUT an environment name, or the OIDC
+      # claim will not match and the upload is rejected with a 403.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv build --out-dir dist
+      - run: uv run --with twine twine check dist/*
+      - run: uv publish --trusted-publishing always dist/*
