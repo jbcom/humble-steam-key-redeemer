@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      body { font: 13px/1.5 -apple-system, system-ui, sans-serif; margin: 0; padding: 16px; width: 300px; color: #1b1b1b; }
+      h1 { font-size: 14px; margin: 0 0 4px; }
+      p { margin: 0 0 12px; color: #555; }
+      button { width: 100%; padding: 8px; margin-bottom: 6px; font-size: 13px; border: 1px solid #c9c9c9;
+               border-radius: 6px; background: #fff; cursor: pointer; }
+      button:hover:not(:disabled) { background: #f4f4f4; }
+      button:disabled { opacity: .5; cursor: default; }
+      #status { padding: 8px; border-radius: 6px; background: #f4f4f4; margin-bottom: 12px; }
+      .ok { color: #14663a; } .bad { color: #99201a; }
+      pre { white-space: pre-wrap; word-break: break-word; background: #f4f4f4; padding: 8px;
+            border-radius: 6px; max-height: 180px; overflow: auto; margin: 0; }
+      @media (prefers-color-scheme: dark) {
+        body { background: #1e1e1e; color: #eee; }
+        p { color: #aaa; }
+        button { background: #2a2a2a; border-color: #444; color: #eee; }
+        button:hover:not(:disabled) { background: #333; }
+        #status, pre { background: #2a2a2a; }
+        .ok { color: #6fd39b; } .bad { color: #ff8f86; }
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Humble Steam Key Redeemer</h1>
+    <p>Uses the Humble session in this browser.</p>
+    <div id="status">Checking…</div>
+    <button id="sync" disabled>Import library</button>
+    <button id="dry-run" disabled>Preview redemptions</button>
+    <pre id="output" hidden></pre>
+    <script src="popup.js"></script>
+  </body>
+</html>

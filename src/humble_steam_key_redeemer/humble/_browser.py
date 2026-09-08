@@ -55,25 +55,30 @@ class HumbleBrowser:
     # ------------------------------------------------------------ lifecycle
 
     def start(self) -> Self:
-        """Launch the browser, restoring a saved session when present.
+        """Start the browser session, restoring a saved session when present.
+
+        When ``cdp_endpoint`` is configured, attaches to that already-running
+        browser instead of launching a new one. That lets the tool reuse a
+        browser a person is already signed into — including one an agent is
+        driving — rather than requiring a separate sign-in in an isolated
+        profile.
 
         Returns:
             This browser session.
 
         Raises:
-            HumbleBrowserError: If the browser cannot be launched.
+            HumbleBrowserError: If the browser cannot be started or reached.
         """
         self._settings.ensure_state_dir()
         try:
             self._playwright = sync_playwright().start()
-            launcher = getattr(self._playwright, self._settings.browser)
-            self._browser = launcher.launch(headless=self._settings.headless)
-            self._context = self._browser.new_context(
-                storage_state=self._storage_state(),
-                locale=self._settings.locale,
-            )
-            self._context.set_default_timeout(self._settings.browser_timeout_ms)
-            self._page = self._context.new_page()
+            if self._settings.cdp_endpoint:
+                self._start_over_cdp()
+            else:
+                self._start_launched()
+        except HumbleBrowserError:
+            self.close()
+            raise
         except Exception as exc:
             self.close()
             raise HumbleBrowserError(
@@ -82,6 +87,52 @@ class HumbleBrowser:
                 "    playwright install chromium"
             ) from exc
         return self
+
+    def _start_launched(self) -> None:
+        """Launch a browser Playwright manages itself."""
+        if self._playwright is None:  # pragma: no cover - start() sets this
+            raise HumbleBrowserError("Playwright is not running")
+        launcher = getattr(self._playwright, self._settings.browser)
+        self._browser = launcher.launch(headless=self._settings.headless)
+        self._context = self._browser.new_context(
+            storage_state=self._storage_state(),
+            locale=self._settings.locale,
+        )
+        self._context.set_default_timeout(self._settings.browser_timeout_ms)
+        self._page = self._context.new_page()
+
+    def _start_over_cdp(self) -> None:
+        """Attach to a browser already running with remote debugging enabled.
+
+        The existing browser owns its profile and cookies, so no saved session
+        is injected: whatever it is signed into is what the tool sees.
+
+        Raises:
+            HumbleBrowserError: If the endpoint cannot be reached.
+        """
+        if self._playwright is None:  # pragma: no cover - start() sets this
+            raise HumbleBrowserError("Playwright is not running")
+        endpoint = self._settings.cdp_endpoint or ""
+        try:
+            self._browser = self._playwright.chromium.connect_over_cdp(endpoint)
+        except Exception as exc:
+            raise HumbleBrowserError(
+                f"Could not attach to a browser at {endpoint}: {exc}\n"
+                "Start one with remote debugging enabled, for example:\n"
+                "    /Applications/Google Chrome.app/Contents/MacOS/Google Chrome \\\n"
+                "      --remote-debugging-port=9222 --user-data-dir=/tmp/hskr-chrome"
+            ) from exc
+
+        # An attached browser already has a context; reuse it so its cookies
+        # apply, rather than creating an isolated one.
+        self._context = self._browser.contexts[0] if self._browser.contexts else self._browser.new_context()
+        self._context.set_default_timeout(self._settings.browser_timeout_ms)
+        self._page = self._context.pages[0] if self._context.pages else self._context.new_page()
+
+    @property
+    def is_attached(self) -> bool:
+        """Whether this session attached to an existing browser."""
+        return bool(self._settings.cdp_endpoint)
 
     def _storage_state(self) -> str | None:
         """Return the saved session path, when one exists and is usable."""
@@ -120,7 +171,9 @@ class HumbleBrowser:
         if self._context is not None:
             with contextlib.suppress(Exception):
                 self._context.close()
-        if self._browser is not None:
+        # Only close a browser this session launched. Closing one we merely
+        # attached to would shut down the user's own browser.
+        if self._browser is not None and not self._settings.cdp_endpoint:
             with contextlib.suppress(Exception):
                 self._browser.close()
         if self._playwright is not None:

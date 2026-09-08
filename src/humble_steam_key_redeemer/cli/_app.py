@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated
@@ -11,6 +12,7 @@ from rich.console import Console
 from rich.table import Table
 
 from humble_steam_key_redeemer import __version__
+from humble_steam_key_redeemer.bridge import install_manifest, run_host
 from humble_steam_key_redeemer.core import KeyRecord, RedeemerStore, RedemptionEngine
 from humble_steam_key_redeemer.humble import (
     HUMBLE_LOGIN_PAGE,
@@ -32,6 +34,9 @@ app = typer.Typer(
 console = Console()
 error_console = Console(stderr=True)
 
+# How often to re-check whether a browser sign-in has completed.
+_LOGIN_POLL_SECONDS = 3
+
 
 def _version(value: bool) -> None:
     """Print the version and exit."""
@@ -50,13 +55,40 @@ def _main(
     """Redeem Humble Bundle keys on Steam."""
 
 
-def _settings(state_dir: Path | None, headless: bool | None) -> Settings:
+def _await_login(client: HumbleClient, timeout: int = 600) -> bool:
+    """Wait until the Humble session is valid.
+
+    Polling rather than prompting means this works with no terminal attached.
+
+    Args:
+        client: Client whose session is checked.
+        timeout: Seconds to wait; ``0`` waits indefinitely.
+
+    Returns:
+        ``True`` once signed in, ``False`` on timeout.
+    """
+    deadline = time.monotonic() + timeout if timeout else None
+    while True:
+        if client.is_logged_in():
+            return True
+        if deadline is not None and time.monotonic() > deadline:
+            return False
+        time.sleep(_LOGIN_POLL_SECONDS)
+
+
+def _settings(
+    state_dir: Path | None,
+    headless: bool | None,
+    cdp_endpoint: str | None = None,
+) -> Settings:
     """Build settings with CLI overrides applied."""
     overrides: dict[str, object] = {}
     if state_dir is not None:
         overrides["state_dir"] = state_dir
     if headless is not None:
         overrides["headless"] = headless
+    if cdp_endpoint is not None:
+        overrides["cdp_endpoint"] = cdp_endpoint
     settings = Settings(**overrides)  # type: ignore[arg-type]
     settings.ensure_state_dir()
     return settings
@@ -99,8 +131,7 @@ def sync(
                     raise typer.Exit(1)
                 console.print(f"Sign in to Humble in the browser window: {HUMBLE_LOGIN_PAGE}")
                 browser.goto(HUMBLE_LOGIN_PAGE)
-                typer.confirm("Press Enter once you are signed in", default=True, abort=False)
-                if not client.is_logged_in():
+                if not _await_login(client):
                     error_console.print("[red]Still not signed in.[/red]")
                     raise typer.Exit(1)
 
@@ -124,18 +155,44 @@ def sync(
 @app.command()
 def login(
     state_dir: StateDirOption = None,
+    timeout: Annotated[
+        int, typer.Option("--timeout", min=0, help="Seconds to wait for sign-in (0 waits forever).")
+    ] = 600,
+    cdp: Annotated[
+        str | None,
+        typer.Option("--cdp", help="Attach to a browser already running at this CDP endpoint."),
+    ] = None,
 ) -> None:
-    """Sign in to Humble in a visible browser window and save the session."""
-    settings = _settings(state_dir, headless=False)
+    """Sign in to Humble in a browser window and save the session.
+
+    The command polls until the session is valid rather than waiting on a
+    keypress, so it works unattended — under an agent, in a script, or with no
+    terminal attached — as well as interactively.
+    """
+    settings = _settings(state_dir, headless=False, cdp_endpoint=cdp)
     try:
         with HumbleBrowser(settings) as browser:
             client = HumbleClient(browser, int(settings.request_timeout * 1000))
             browser.goto(HUMBLE_LOGIN_PAGE)
+
+            if client.is_logged_in():
+                path = browser.save_session()
+                console.print(f"Already signed in. Session saved to [bold]{path}[/bold].")
+                return
+
             console.print("Complete the Humble sign-in in the browser window.")
-            typer.confirm("Press Enter once you are signed in", default=True, abort=False)
-            if not client.is_logged_in():
-                error_console.print("[red]Sign-in was not completed.[/red]")
-                raise typer.Exit(1)
+            console.print("[dim]Waiting for sign-in; no keypress needed.[/dim]")
+
+            deadline = time.monotonic() + timeout if timeout else None
+            with console.status("Waiting for Humble sign-in..."):
+                while True:
+                    if client.is_logged_in():
+                        break
+                    if deadline is not None and time.monotonic() > deadline:
+                        error_console.print(f"[red]Sign-in was not completed within {timeout}s.[/red]")
+                        raise typer.Exit(1)
+                    time.sleep(_LOGIN_POLL_SECONDS)
+
             path = browser.save_session()
     except HumbleBrowserError as exc:
         error_console.print(f"[red]{exc}[/red]")
@@ -347,6 +404,50 @@ def export(
     store = RedeemerStore(settings.database_path)
     path = store.export_csv(destination, steam_only=steam_only)
     console.print(f"Exported to [bold]{path}[/bold].")
+
+
+@app.command()
+def bridge(
+    extension_id: Annotated[
+        str | None,
+        typer.Option("--extension-id", help="Chrome extension id to authorize."),
+    ] = None,
+    serve: Annotated[
+        bool, typer.Option("--serve", hidden=True, help="Run as the native messaging host.")
+    ] = False,
+    state_dir: StateDirOption = None,
+) -> None:
+    """Set up the Chrome extension bridge, or serve it.
+
+    Without arguments this prints the steps to install the extension. With
+    `--extension-id` it registers the native messaging host so Chrome will let
+    that extension talk to this tool.
+    """
+    if serve:
+        run_host()
+        return
+
+    settings = _settings(state_dir, headless=None)
+    settings.ensure_state_dir()
+    source = Path(__file__).resolve().parents[3] / "extension"
+
+    if extension_id is None:
+        console.print("[bold]Install the Chrome extension[/bold]\n")
+        console.print("1. Open [bold]chrome://extensions[/bold]")
+        console.print("2. Turn on [bold]Developer mode[/bold] (top right)")
+        console.print("3. Click [bold]Load unpacked[/bold] and choose:")
+        console.print(f"   [bold]{source}[/bold]")
+        console.print("4. Copy the extension's ID from its card, then run:\n")
+        console.print("   [bold]hskr bridge --extension-id <ID>[/bold]\n")
+        console.print(
+            "[dim]Chrome only starts a native host that names the calling extension, "
+            "so the ID has to be registered before the extension can reach this tool.[/dim]"
+        )
+        return
+
+    manifest = install_manifest(extension_id)
+    console.print(f"Registered native messaging host at [bold]{manifest}[/bold].")
+    console.print("Reload the extension in chrome://extensions, then use its toolbar button.")
 
 
 @app.command()

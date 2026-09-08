@@ -1,0 +1,289 @@
+// Drives Humble Bundle and Steam inside the tabs the user is already signed
+// into, and reports results to the hskr command-line tool over native
+// messaging.
+//
+// Acting in the user's own tabs is the point. Handing cookies to a separate
+// automated browser means a second sign-in, a profile Chrome has locked, and a
+// session that Steam and Humble both treat as a new device. Running here means
+// every request carries the session the user already established.
+//
+// The extension is a transport and an executor, not a second brain: it fetches
+// and posts, then hands raw payloads to hskr. Ownership matching, the key
+// database, rate-limit accounting, and the decision of what is worth redeeming
+// all stay in the Python implementation.
+
+const HOST = "com.jbcom.hskr";
+const HUMBLE = "https://www.humblebundle.com";
+const STEAM = "https://store.steampowered.com";
+
+// Humble throttles bursts of order lookups, so details are fetched in batches.
+const ORDER_BATCH_SIZE = 20;
+
+// Steam permits roughly 50 activations an hour but only about 10 failures, so
+// a rate-limited response stops the run rather than deepening the cooldown.
+const STEAM_RATE_LIMITED = 53;
+
+/** Find a tab already open on an origin, or open one. */
+async function tabFor(urlPrefix) {
+  const [existing] = await chrome.tabs.query({ url: `${urlPrefix}/*` });
+  if (existing) return existing;
+  return chrome.tabs.create({ url: urlPrefix, active: false });
+}
+
+/**
+ * Run a function in the page's own context.
+ *
+ * Arguments cross into the page over Chrome's structured channel rather than
+ * being interpolated into source, so a title or key containing a quote is
+ * inert data rather than executable text.
+ */
+async function inPage(tabId, fn, args = []) {
+  const [result] = await chrome.scripting.executeScript({
+    target: { tabId },
+    world: "MAIN",
+    func: fn,
+    args,
+  });
+  if (result?.result?.error) throw new Error(result.result.error);
+  return result?.result;
+}
+
+// ---------------------------------------------------------------- Humble
+
+async function humbleSignedIn() {
+  const response = await fetch(`${HUMBLE}/home/library`, {
+    credentials: "include",
+    redirect: "follow",
+  });
+  return response.ok && !response.redirected;
+}
+
+/** Read every order, in batches, from inside the Humble page. */
+async function readOrders() {
+  const tab = await tabFor(HUMBLE);
+  return inPage(
+    tab.id,
+    async (batchSize) => {
+      try {
+        const listed = await fetch("/api/v1/user/order", { credentials: "include" });
+        if (!listed.ok) return { error: `Humble returned HTTP ${listed.status}` };
+        const gamekeys = (await listed.json()).map((o) => o.gamekey);
+
+        const orders = [];
+        for (let i = 0; i < gamekeys.length; i += batchSize) {
+          for (const gamekey of gamekeys.slice(i, i + batchSize)) {
+            const url = `/api/v1/order/${encodeURIComponent(gamekey)}?all_tpkds=true`;
+            const detail = await fetch(url, { credentials: "include" });
+            if (!detail.ok) {
+              return { error: `Humble returned HTTP ${detail.status} for order ${gamekey}` };
+            }
+            orders.push(await detail.json());
+          }
+        }
+        return { orders };
+      } catch (error) {
+        return { error: String(error.message || error) };
+      }
+    },
+    [ORDER_BATCH_SIZE],
+  );
+}
+
+/**
+ * Reveal one key on Humble.
+ *
+ * Irreversible: revealing forfeits the ability to generate a gift link, which
+ * is why hskr decides what to reveal and this only carries out the request.
+ */
+async function revealKey({ machineName, gamekey, keyIndex }) {
+  const tab = await tabFor(HUMBLE);
+  return inPage(
+    tab.id,
+    async (payload) => {
+      try {
+        const csrf = document.cookie.match(/csrf_cookie=([^;]+)/)?.[1] ?? "";
+        const body = new FormData();
+        body.append("keytype", payload.machineName);
+        body.append("key", payload.gamekey);
+        body.append("keyindex", String(payload.keyIndex ?? 0));
+
+        const response = await fetch("/humbler/redeemkey", {
+          method: "POST",
+          credentials: "include",
+          headers: csrf ? { "CSRF-Prevention-Token": decodeURIComponent(csrf) } : {},
+          body,
+        });
+        const parsed = await response.json().catch(() => null);
+        return { status: response.status, body: parsed };
+      } catch (error) {
+        return { error: String(error.message || error) };
+      }
+    },
+    [{ machineName, gamekey, keyIndex }],
+  );
+}
+
+// ----------------------------------------------------------------- Steam
+
+async function steamSignedIn() {
+  const response = await fetch(`${STEAM}/account/registerkey`, {
+    credentials: "include",
+    redirect: "manual",
+  });
+  return response.type === "opaqueredirect" ? false : response.ok;
+}
+
+/** Read the signed-in account's owned applications. */
+async function readOwnedApps() {
+  const tab = await tabFor(STEAM);
+  return inPage(tab.id, async () => {
+    try {
+      const userdata = await (
+        await fetch("/dynamicstore/userdata/", { credentials: "include" })
+      ).json();
+      const owned = new Set([
+        ...(userdata.rgOwnedApps ?? []),
+        ...(userdata.rgOwnedPackages ?? []),
+      ]);
+      if (owned.size === 0) return { apps: {} };
+
+      const list = await (
+        await fetch("https://api.steampowered.com/ISteamApps/GetAppList/v2/")
+      ).json();
+
+      const apps = {};
+      for (const app of list.applist?.apps ?? []) {
+        if (owned.has(app.appid) && app.name) apps[app.appid] = app.name;
+      }
+      return { apps };
+    } catch (error) {
+      return { error: String(error.message || error) };
+    }
+  });
+}
+
+/** Redeem one product key on Steam. */
+async function redeemKey(key) {
+  const tab = await tabFor(STEAM);
+  return inPage(
+    tab.id,
+    async (productKey) => {
+      try {
+        const sessionid = document.cookie.match(/sessionid=([^;]+)/)?.[1];
+        if (!sessionid) return { error: "No Steam sessionid cookie; sign in to Steam first." };
+
+        const body = new URLSearchParams({ product_key: productKey, sessionid });
+        const response = await fetch("/account/ajaxregisterkey/", {
+          method: "POST",
+          credentials: "include",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body,
+        });
+        return { status: response.status, body: await response.json().catch(() => null) };
+      } catch (error) {
+        return { error: String(error.message || error) };
+      }
+    },
+    [key],
+  );
+}
+
+// ------------------------------------------------------------------ hskr
+
+/** Ask hskr what to do, handing it what the browser just read. */
+async function askHskr(command, payload = {}) {
+  return chrome.runtime.sendNativeMessage(HOST, { command, ...payload });
+}
+
+/** Import the library: browser reads the orders, hskr stores and analyses them. */
+async function sync() {
+  if (!(await humbleSignedIn())) {
+    throw new Error("Not signed in to Humble. Open humblebundle.com and sign in.");
+  }
+  const result = await readOrders();
+  if (result?.error) throw new Error(result.error);
+  return askHskr("sync", { orders: result.orders });
+}
+
+/** Ask hskr what it would redeem, using ownership read from the live session. */
+async function preview() {
+  if (!(await steamSignedIn())) {
+    throw new Error("Not signed in to Steam. Open store.steampowered.com and sign in.");
+  }
+  const owned = await readOwnedApps();
+  if (owned?.error) throw new Error(owned.error);
+  return askHskr("plan", { owned: owned.apps });
+}
+
+/**
+ * Redeem what hskr selects.
+ *
+ * hskr decides: it checks ownership, skips duplicates and non-keys, and stops
+ * the run when Steam reports a rate limit. The extension only carries out the
+ * individual requests and reports each verdict back.
+ */
+async function redeem({ reveal = false } = {}) {
+  if (!(await steamSignedIn())) {
+    throw new Error("Not signed in to Steam. Open store.steampowered.com and sign in.");
+  }
+  const owned = await readOwnedApps();
+  if (owned?.error) throw new Error(owned.error);
+
+  const plan = await askHskr("plan", { owned: owned.apps, reveal });
+  if (!plan?.ok) throw new Error(plan?.error ?? "hskr could not build a plan");
+
+  const results = [];
+  for (const entry of plan.attempts ?? []) {
+    let key = entry.key;
+
+    if (!key && reveal && entry.reveal) {
+      const revealed = await revealKey(entry.reveal);
+      if (revealed?.error || revealed?.status !== 200) {
+        results.push({ id: entry.id, revealed: false, detail: revealed?.error ?? "reveal failed" });
+        continue;
+      }
+      key = revealed.body?.key;
+      if (!key) {
+        results.push({ id: entry.id, revealed: false, detail: "Humble returned no key" });
+        continue;
+      }
+    }
+    if (!key) continue;
+
+    const outcome = await redeemKey(key);
+    const detail = outcome?.body?.purchase_result_details ?? null;
+    results.push({ id: entry.id, key, status: outcome?.status, result: outcome?.body });
+
+    // Report progress as it happens rather than only at the end.
+    await askHskr("record", { result: results.at(-1) });
+
+    if (detail === STEAM_RATE_LIMITED) break;
+  }
+
+  return askHskr("finish", { results });
+}
+
+// --------------------------------------------------------------- routing
+
+const ACTIONS = {
+  status: async () => ({
+    humble: await humbleSignedIn(),
+    steam: await steamSignedIn(),
+  }),
+  sync,
+  preview,
+  redeem: (message) => redeem({ reveal: Boolean(message.reveal) }),
+};
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  (async () => {
+    try {
+      const action = ACTIONS[message.action];
+      if (!action) throw new Error(`Unknown action: ${message.action}`);
+      sendResponse({ ok: true, reply: await action(message) });
+    } catch (error) {
+      sendResponse({ ok: false, error: String(error.message || error) });
+    }
+  })();
+  return true; // keep the channel open for the async reply
+});

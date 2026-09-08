@@ -17,6 +17,7 @@ docs/build/
 .agent-state/.last-stop-sha
 .agent-state/.last-compaction
 .agent-state/batch.json
+.agent-state/.last-board-change
 
 # Session credentials. The current tool keeps these in a per-user state
 # directory, but a machine upgraded from the pre-1.0 script still has these

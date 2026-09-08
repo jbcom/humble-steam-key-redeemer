@@ -39,6 +39,8 @@ class Settings(BaseSettings):
             considered to match an owned Steam app.
         confirm_threshold: Score at or above which a match is trusted without
             asking the user.
+        cdp_endpoint: Attach to an existing browser at this CDP endpoint
+            (for example ``http://localhost:9222``) rather than launching one.
         headless: Whether the Humble browser runs without a visible window.
         browser_timeout_ms: Per-operation browser timeout in milliseconds.
         request_timeout: HTTP timeout in seconds.
@@ -59,6 +61,11 @@ class Settings(BaseSettings):
     # misses and a low bar produces false matches that skip redeemable keys.
     match_threshold: int = Field(default=70, ge=0, le=100)
     confirm_threshold: int = Field(default=95, ge=0, le=100)
+
+    # Attach to a browser already running with remote debugging instead of
+    # launching one. Lets the tool reuse a browser that is already signed in —
+    # including one an agent drives — rather than a fresh isolated profile.
+    cdp_endpoint: str | None = None
 
     headless: bool = True
     browser: Literal["chromium", "firefox", "webkit"] = "chromium"

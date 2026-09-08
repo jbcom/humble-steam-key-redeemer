@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Humble Steam Key Redeemer",
+  "version": "1.0.0",
+  "description": "Drives Humble Bundle and Steam in the tabs you are already signed into, and reports to the hskr command-line tool.",
+  "permissions": [
+    "cookies",
+    "nativeMessaging",
+    "storage",
+    "scripting",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://*.humblebundle.com/*",
+    "https://store.steampowered.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Humble Steam Key Redeemer",
+    "default_popup": "popup.html"
+  }
+}
