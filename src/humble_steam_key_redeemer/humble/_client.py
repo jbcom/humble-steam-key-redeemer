@@ -55,7 +55,11 @@ async (gamekeys) => {
         const url = 'https://www.humblebundle.com/api/v1/order/'
                   + encodeURIComponent(gamekey) + '?all_tpkds=true';
         const response = await fetch(url);
-        if (response.ok) { results.push(await response.json()); }
+        if (!response.ok) {
+            throw new Error('Humble returned HTTP ' + response.status
+                            + ' for order ' + gamekey);
+        }
+        results.push(await response.json());
     }
     return results;
 }

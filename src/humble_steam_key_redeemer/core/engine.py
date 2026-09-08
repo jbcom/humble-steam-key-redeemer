@@ -88,12 +88,13 @@ class RedemptionPlan:
 
     @property
     def uncertain(self) -> list[PlanEntry]:
-        """Skipped entries whose ownership match was not confident.
+        """Entries that matched an owned game without clearing confirmation.
 
-        These are the entries worth showing a user, since a wrong skip costs
-        a redeemable key.
+        These are attempted rather than skipped, because a wrong skip wastes a
+        redeemable key outright. They are surfaced so the reason for an
+        "already owned" result is visible rather than surprising.
         """
-        return [entry for entry in self.skipped if entry.decision.matched and not entry.decision.confident]
+        return [entry for entry in self.entries if entry.decision.matched and not entry.decision.confident]
 
 
 @dataclass(slots=True)
@@ -155,7 +156,13 @@ class RedemptionEngine:
                 continue
 
             # Two entries for the same game would burn a failure on the second.
-            identity = record.human_name.strip().casefold()
+            # Steam's app id is authoritative when Humble supplies it; two
+            # differently-titled records for one app are still one game.
+            identity = (
+                f"appid:{record.steam_app_id}"
+                if record.steam_app_id is not None
+                else record.human_name.strip().casefold()
+            )
             if identity in seen:
                 plan.entries.append(
                     PlanEntry(record, MatchDecision(None, None, 0, confident=False), "duplicate in this run")
@@ -164,7 +171,11 @@ class RedemptionEngine:
             seen.add(identity)
 
             decision = matcher.match(record.human_name, steam_app_id=record.steam_app_id)
-            reason = "already owned on Steam" if decision.matched else None
+            # Only a confident match skips the key. A borderline one is
+            # surfaced and still attempted: a wrong skip silently wastes a
+            # redeemable key, while a wrong attempt costs one retryable
+            # failure and reports precisely what happened.
+            reason = "already owned on Steam" if decision.confident else None
             plan.entries.append(PlanEntry(record, decision, reason))
 
         return plan

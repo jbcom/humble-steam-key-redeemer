@@ -109,7 +109,7 @@ def sync(
                 orders = client.order_details()
             records = to_key_records(orders)
             written = store.upsert_keys(records)
-    except HumbleBrowserError as exc:
+    except (HumbleBrowserError, HumbleAPIError) as exc:
         error_console.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
 
@@ -245,11 +245,21 @@ def redeem(
             ):
                 raise typer.Abort
             with HumbleBrowser(settings) as browser:
+                humble = HumbleClient(browser)
+                # A fresh page sits on about:blank. Revealing issues fetches
+                # that must run from the Humble origin to carry its session
+                # cookies, so navigate and confirm the session before starting.
+                if not humble.is_logged_in():
+                    error_console.print(
+                        "[red]Not signed in to Humble, so keys cannot be revealed.[/red] "
+                        "Run [bold]hskr login[/bold] first."
+                    )
+                    raise typer.Exit(1)
                 summary = engine.redeem(
                     plan,
                     limit=limit,
                     on_result=_report,
-                    reveal=_revealer(HumbleClient(browser)),
+                    reveal=_revealer(humble),
                 )
         else:
             summary = engine.redeem(plan, limit=limit, on_result=_report)

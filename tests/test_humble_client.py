@@ -136,3 +136,11 @@ class TestReveal:
     def test_missing_key_value_returns_none(self):
         browser = FakeBrowser([{"status": 200, "body": {"success": True}}])
         assert HumbleClient(browser).reveal_key(self._record()) is None
+
+
+class TestPartialOrderData:
+    def test_a_failed_order_detail_fails_the_batch(self):
+        """A silently partial import would look like a complete library."""
+        browser = FakeBrowser([RuntimeError("Humble returned HTTP 429 for order o1")])
+        with pytest.raises(HumbleAPIError, match="Could not read Humble order details"):
+            HumbleClient(browser).order_details(["o1"])

@@ -244,5 +244,31 @@ class _FakeBrowserCtx:
 
 
 class _FakeHumbleClient:
+    def __init__(self, logged_in: bool = True) -> None:
+        self._logged_in = logged_in
+
+    def is_logged_in(self) -> bool:
+        return self._logged_in
+
     def reveal_key(self, _record) -> str:
         return "ZZZZZ-YYYYY-XXXXX"
+
+
+class TestRevealRequiresHumbleSession:
+    """A fresh page is about:blank, so the reveal fetch would lose cookies."""
+
+    def test_reveal_aborts_when_not_signed_in(self, state_dir, monkeypatch):
+        TestRevealWiring._patch_gateway(monkeypatch)
+        store = RedeemerStore(state_dir / "redeemer.db")
+        store.upsert_keys(
+            [KeyRecord(gamekey="o", machine_name="u", human_name="Unrevealed", key_type="steam")]
+        )
+        monkeypatch.setattr("humble_steam_key_redeemer.cli._app.HumbleBrowser", lambda _s: _FakeBrowserCtx())
+        monkeypatch.setattr(
+            "humble_steam_key_redeemer.cli._app.HumbleClient",
+            lambda _b: _FakeHumbleClient(logged_in=False),
+        )
+
+        result = runner.invoke(app, ["redeem", "--state-dir", str(state_dir), "--yes", "--reveal"])
+
+        assert result.exit_code == 1

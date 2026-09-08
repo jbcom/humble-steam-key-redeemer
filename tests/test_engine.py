@@ -188,3 +188,40 @@ class TestRedemption:
         engine.redeem(engine.plan(records), on_result=lambda record, _attempt: seen.append(record.human_name))
 
         assert seen == ["A", "B"]
+
+
+class TestPlanIdentityAndConfidence:
+    """Regressions for duplicate identity and threshold gating."""
+
+    def test_same_app_id_under_different_titles_is_one_entry(self, store):
+        """Two names for one app would otherwise cost a second activation."""
+        records = _seed(
+            store,
+            _key("Game of the Year Edition", 1, steam_app_id=620),
+            _key("Game GOTY", 2, steam_app_id=620),
+        )
+        engine = RedemptionEngine(store, FakeSteam())
+
+        plan = engine.plan(records)
+
+        assert len(plan.to_attempt) == 1
+        assert plan.skipped[0].skip_reason == "duplicate in this run"
+
+    def test_borderline_match_is_attempted_not_skipped(self, store):
+        """A wrong skip wastes the key; a wrong attempt costs one failure."""
+        records = _seed(store, _key("Half Life", 1))
+        engine = RedemptionEngine(store, FakeSteam(owned={220: "Half-Life 2"}))
+
+        plan = engine.plan(records, match_threshold=50, confirm_threshold=99)
+
+        assert len(plan.to_attempt) == 1
+        assert len(plan.uncertain) == 1
+
+    def test_confident_match_is_still_skipped(self, store):
+        records = _seed(store, _key("Portal 2", 1, steam_app_id=620))
+        engine = RedemptionEngine(store, FakeSteam(owned={620: "Portal 2"}))
+
+        plan = engine.plan(records)
+
+        assert plan.to_attempt == []
+        assert plan.skipped[0].skip_reason == "already owned on Steam"

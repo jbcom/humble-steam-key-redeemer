@@ -113,6 +113,12 @@ class OwnershipMatcher:
             ),
         )
         refined = int(fuzz.token_sort_ratio(title, name, processor=utils.default_process))
+        if refined < self._threshold:
+            # The candidate only cleared the subset-tolerant score. Reporting a
+            # match here would skip the key as owned on the strength of a score
+            # the caller already deemed too low.
+            return MatchDecision(None, None, refined, confident=False)
+
         return MatchDecision(
             app_id=self._app_ids[index],
             app_name=name,

@@ -84,3 +84,20 @@ class TestConfidence:
 
     def test_candidates_empty_for_unowned(self, matcher):
         assert matcher.candidates("Celeste") == []
+
+
+class TestThresholdIsAppliedToTheRefinedScore:
+    """The subset-tolerant score gathers candidates; it must not decide alone."""
+
+    def test_partial_title_below_threshold_does_not_match(self):
+        """ "Portal" clears token_set against "Portal 2" but not token_sort."""
+        matcher = OwnershipMatcher({620: "Portal 2"}, threshold=95, confirm_threshold=99)
+
+        decision = matcher.match("Portal")
+
+        assert not decision.matched
+        assert decision.app_id is None
+
+    def test_exact_title_still_matches_at_a_high_threshold(self):
+        matcher = OwnershipMatcher({620: "Portal 2"}, threshold=95, confirm_threshold=99)
+        assert matcher.match("Portal 2").app_id == 620

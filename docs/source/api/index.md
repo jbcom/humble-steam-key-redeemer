@@ -22,7 +22,8 @@ settings = Settings()
 store = RedeemerStore(settings.database_path)
 
 gateway = VendorFabricSteamGateway(settings)
-gateway.restore()
+if not gateway.restore():
+    raise SystemExit("No saved Steam session; run `hskr redeem` once to sign in.")
 
 engine = RedemptionEngine(store, gateway)
 plan = engine.plan(store.pending_keys())
