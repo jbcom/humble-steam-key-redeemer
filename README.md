@@ -108,6 +108,6 @@ packaged, tested project. The notable changes:
 
 ## License
 
-The upstream project ships no license file, so no license is asserted here yet.
-See [#licensing](https://github.com/jbcom/humble-steam-key-redeemer/issues) —
-this needs resolving with the original author before publishing.
+MIT — see [LICENSE](LICENSE). Copyright is shared with the original
+[humble-steam-key-redeemer](https://github.com/FailSpy/humble-steam-key-redeemer)
+authors, whose work this fork derives from.

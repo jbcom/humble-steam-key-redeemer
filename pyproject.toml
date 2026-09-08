@@ -7,6 +7,8 @@ name = "humble-steam-key-redeemer"
 dynamic = ["version"]
 description = "Redeem Humble Bundle keys on Steam, skipping games you already own."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 authors = [{ name = "Jon Bogaty", email = "jon@jonbogaty.com" }]
 keywords = ["humble-bundle", "steam", "keys", "redeem", "automation", "playwright"]
@@ -14,6 +16,7 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
     "Natural Language :: English",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
@@ -72,7 +75,7 @@ path = "src/humble_steam_key_redeemer/__init__.py"
 packages = ["src/humble_steam_key_redeemer"]
 
 [tool.hatch.build.targets.sdist]
-include = ["/src", "/tests", "/docs", "/README.md"]
+include = ["/src", "/tests", "/docs", "/README.md", "/LICENSE"]
 
 # ------------------------------------------------------------ hatch envs
 
