@@ -94,6 +94,12 @@ The tool stops as soon as Steam reports a rate limit, because further attempts
 during a cooldown extend it. Rerun about an hour later; keys that were only
 rate-limited stay eligible, while keys that got a real verdict are not retried.
 
+A key interrupted mid-activation — the process died after Steam saw the key but
+before the result was recorded — is left in the `attempted` state and is *not*
+retried automatically, because Steam may well have accepted it and a retry
+would spend one of the scarce failures. `hskr status` shows these; check the
+game in your Steam library before deciding.
+
 ```bash
 hskr redeem --yes   # later, to pick up where it stopped
 ```

@@ -7,6 +7,14 @@
 docs/build/
 .tox/
 
+# Session credentials. The current tool keeps these in a per-user state
+# directory, but a machine upgraded from the pre-1.0 script still has these
+# in the working directory, and they are bearer credentials.
+.humblecookies
+.steamcookies
+*.cookies
+skipped.txt
+
 ### Python ###
 # Byte-compiled / optimized / DLL files
 __pycache__/

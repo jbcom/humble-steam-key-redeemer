@@ -28,6 +28,7 @@ class KeyState(StrEnum):
 
     UNREVEALED = "unrevealed"
     REVEALED = "revealed"
+    ATTEMPTED = "attempted"
     REDEEMED = "redeemed"
     ALREADY_OWNED = "already_owned"
     FAILED = "failed"

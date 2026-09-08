@@ -166,7 +166,15 @@ class RedeemerStore:
                 for attempt in session.exec(select(RedemptionAttempt)).all()
                 if attempt.result_code != RATE_LIMITED_CODE
             }
-            terminal = {KeyState.REDEEMED, KeyState.ALREADY_OWNED, KeyState.SKIPPED}
+            # ATTEMPTED means a previous run reached Steam but never recorded
+            # the verdict. Steam may have accepted the key, so retrying could
+            # spend a failure on a key that already worked; surface it instead.
+            terminal = {
+                KeyState.REDEEMED,
+                KeyState.ALREADY_OWNED,
+                KeyState.SKIPPED,
+                KeyState.ATTEMPTED,
+            }
             return [
                 key
                 for key in session.exec(select(KeyRecord)).all()

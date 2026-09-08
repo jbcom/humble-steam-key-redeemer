@@ -94,13 +94,21 @@ class Settings(BaseSettings):
     def ensure_state_dir(self) -> Path:
         """Create the state directory with owner-only permissions.
 
-        Session files are bearer credentials, so the directory is created
-        as ``0700`` rather than inheriting a permissive umask.
+        Session files here are bearer credentials — a copied Steam session
+        bypasses Steam Guard — so the directory must not be group- or
+        world-accessible.
+
+        ``mkdir(mode=...)`` only applies to a directory it actually creates
+        and is further masked by the umask, so the mode is set explicitly
+        afterwards. Otherwise a directory that already existed with loose
+        permissions would silently keep them.
 
         Returns:
             The state directory path.
         """
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if self.state_dir.stat().st_mode & 0o077:
+            self.state_dir.chmod(0o700)
         return self.state_dir
 
 

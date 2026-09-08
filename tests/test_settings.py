@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 from vendor_fabric.steam import SteamSession
@@ -74,3 +75,18 @@ class TestSteamSessionStorage:
         settings.ensure_state_dir()
         settings.steam_session_path.write_text(json.dumps({"steam_id": "1"}), encoding="utf-8")
         assert load_session(settings.steam_session_path) is None
+
+
+class TestStateDirectoryPermissions:
+    """Session files here are bearer credentials."""
+
+    def test_an_existing_loose_directory_is_tightened(self, settings):
+        """mkdir(mode=...) is a no-op on a directory that already exists."""
+        old = os.umask(0)
+        try:
+            settings.state_dir.mkdir(parents=True, mode=0o777)
+            settings.ensure_state_dir()
+        finally:
+            os.umask(old)
+
+        assert settings.state_dir.stat().st_mode & 0o077 == 0

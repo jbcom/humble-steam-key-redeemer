@@ -221,6 +221,13 @@ class RedemptionEngine:
                 record.state = KeyState.REVEALED
                 self._store.update_key(record)
 
+            # Mark the key in-flight before Steam sees it. If the process
+            # dies mid-activation, the key is not silently offered up for a
+            # second activation on the next run: it lands in ATTEMPTED and a
+            # human decides, because Steam may well have accepted it.
+            record.state = KeyState.ATTEMPTED
+            self._store.update_key(record)
+
             outcome = self._steam.redeem_key(key_value)
             attempt = self._record(record, outcome)
 
@@ -262,7 +269,10 @@ class RedemptionEngine:
             record.state = KeyState.REDEEMED
         elif code in ALREADY_OWNED_CODES:
             record.state = KeyState.ALREADY_OWNED
-        elif code != RATE_LIMITED_CODE:
+        elif code == RATE_LIMITED_CODE:
+            # Never reached Steam's verdict, so the key is still eligible.
+            record.state = KeyState.REVEALED if record.redeemed_key_val else KeyState.UNREVEALED
+        else:
             record.state = KeyState.FAILED
         self._store.update_key(record)
 

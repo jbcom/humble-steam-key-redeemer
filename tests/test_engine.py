@@ -225,3 +225,27 @@ class TestPlanIdentityAndConfidence:
 
         assert plan.to_attempt == []
         assert plan.skipped[0].skip_reason == "already owned on Steam"
+
+
+class TestInterruptedActivation:
+    """A crash between contacting Steam and recording the verdict."""
+
+    def test_a_key_is_marked_in_flight_before_steam_sees_it(self, store):
+        records = _seed(store, _key("A", 1))
+        observed: list[KeyState] = []
+
+        class CrashingSteam(FakeSteam):
+            def redeem_key(self, key: str) -> dict[str, object]:
+                observed.append(store.all_keys()[0].state)
+                raise RuntimeError("process died mid-activation")
+
+        engine = RedemptionEngine(store, CrashingSteam())
+        with pytest.raises(RuntimeError):
+            engine.redeem(engine.plan(records))
+
+        assert observed == [KeyState.ATTEMPTED]
+
+    def test_an_interrupted_key_is_not_silently_retried(self, store):
+        """Steam may have accepted it, so a retry could spend a failure."""
+        _seed(store, _key("A", 1, state=KeyState.ATTEMPTED))
+        assert store.pending_keys() == []
