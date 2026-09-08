@@ -75,7 +75,8 @@ def _await_login(client: HumbleClient, timeout: int = 600) -> bool:
     """
     deadline = time.monotonic() + timeout if timeout else None
     while True:
-        if client.is_logged_in():
+        # Quietly: navigating would replace the form being filled in.
+        if client.is_logged_in_quietly():
             return True
         if deadline is not None and time.monotonic() > deadline:
             return False
@@ -192,7 +193,7 @@ def login(
             deadline = time.monotonic() + timeout if timeout else None
             with console.status("Waiting for Humble sign-in..."):
                 while True:
-                    if client.is_logged_in():
+                    if client.is_logged_in_quietly():
                         break
                     if deadline is not None and time.monotonic() > deadline:
                         error_console.print(f"[red]Sign-in was not completed within {timeout}s.[/red]")
@@ -412,6 +413,34 @@ def export(
     console.print(f"Exported to [bold]{path}[/bold].")
 
 
+def _extension_directory() -> Path:
+    """Locate the extension, installed or in a checkout.
+
+    An installed copy ships inside the package; a checkout has it at the
+    repository root. Pointing someone at a path that does not exist is worse
+    than saying it is missing, so both are tried.
+
+    Returns:
+        The directory holding the extension.
+
+    Raises:
+        typer.Exit: If neither location has it.
+    """
+    packaged = Path(__file__).resolve().parents[1] / "extension"
+    if (packaged / "manifest.json").is_file():
+        return packaged
+
+    checkout = Path(__file__).resolve().parents[3] / "extension"
+    if (checkout / "manifest.json").is_file():
+        return checkout
+
+    error_console.print(
+        "[red]The extension is missing from this installation.[/red] "
+        "Install from PyPI, or run from a checkout of the repository."
+    )
+    raise typer.Exit(1)
+
+
 @app.command()
 def bridge(
     extension_id: Annotated[
@@ -435,7 +464,7 @@ def bridge(
 
     settings = _settings(state_dir, headless=None)
     settings.ensure_state_dir()
-    source = Path(__file__).resolve().parents[3] / "extension"
+    source = _extension_directory()
 
     if extension_id is None:
         console.print("[bold]Install the Chrome extension[/bold]\n")
@@ -451,7 +480,7 @@ def bridge(
         )
         return
 
-    manifest = install_manifest(extension_id)
+    manifest = install_manifest(extension_id, settings=settings)
     console.print(f"Registered native messaging host at [bold]{manifest}[/bold].")
     console.print("Reload the extension in chrome://extensions, then either:\n")
     console.print("  [bold]hskr browser sync[/bold]   drive it from here, no clicking")

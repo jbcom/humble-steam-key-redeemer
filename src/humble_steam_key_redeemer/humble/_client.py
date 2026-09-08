@@ -106,6 +106,27 @@ class HumbleClient:
         self._browser.goto(HUMBLE_LIBRARY_PAGE)
         return bool(self._browser.evaluate(_IS_LOGGED_IN))
 
+    def is_logged_in_quietly(self) -> bool:
+        """Report whether the session is signed in, without navigating.
+
+        Polling :meth:`is_logged_in` while someone is signing in destroys the
+        form they are typing into, because it navigates. This asks the same
+        question with a request instead, so a login page or a two-factor
+        prompt is left alone.
+
+        Returns:
+            ``True`` when Humble serves the library without redirecting.
+        """
+        try:
+            # The same request, minus the navigation. It still runs from the
+            # Humble origin, which the login page already is, so it carries
+            # the session being established.
+            return bool(self._browser.evaluate(_IS_LOGGED_IN))
+        except Exception:
+            # A page that has not loaded, or navigated mid-check, is simply
+            # not a signed-in answer yet.
+            return False
+
     def order_keys(self) -> list[str]:
         """List the gamekeys of every order on the account.
 

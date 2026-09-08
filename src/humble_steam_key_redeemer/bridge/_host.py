@@ -21,6 +21,7 @@ from typing import Any, BinaryIO
 
 from humble_steam_key_redeemer.bridge import _queue
 from humble_steam_key_redeemer.core import RedeemerStore, RedemptionEngine
+from humble_steam_key_redeemer.core.models import KeyState
 from humble_steam_key_redeemer.settings import Settings
 
 NATIVE_HOST_NAME = "com.jbcom.hskr"
@@ -106,6 +107,7 @@ def handle_message(message: dict[str, Any], settings: Settings | None = None) ->
         "status": _status,
         "sync": _sync,
         "plan": _plan,
+        "attempting": _attempting,
         "record": _record,
         "finish": _finish,
     }
@@ -194,13 +196,27 @@ def _plan(message: dict[str, Any], settings: Settings) -> dict[str, Any]:
         confirm_threshold=settings.confirm_threshold,
     )
 
+    from vendor_fabric.steam import is_valid_key  # noqa: PLC0415
+
     attempts = []
+    unrevealed = 0
     for entry in plan.to_attempt:
         record = entry.record
         if not record.redeemed_key_val and not reveal:
             # Revealing forfeits the gift link permanently, so it only happens
             # when the caller explicitly asked for it.
+            unrevealed += 1
             continue
+
+        # Gift links and placeholder text live in the same field as real keys.
+        # Sending one to Steam spends one of about ten failed activations an
+        # hour, so the browser never sees it — the same guard the engine
+        # applies, because the browser path must not be the lenient one.
+        if record.redeemed_key_val and not is_valid_key(record.redeemed_key_val):
+            record.state = KeyState.SKIPPED
+            store.update_key(record)
+            continue
+
         attempts.append(
             {
                 "id": record.id,
@@ -223,11 +239,48 @@ def _plan(message: dict[str, Any], settings: Settings) -> dict[str, Any]:
     return {
         "ok": True,
         "attempts": attempts,
-        "skipped": len(plan.skipped),
+        # Unrevealed keys are dropped above, so a library of nothing but those
+        # would otherwise report zero attempts and zero skipped, hiding the
+        # fact that --reveal is what it is waiting for.
+        "skipped": len(plan.skipped) + unrevealed,
+        "unrevealed": unrevealed,
         "uncertain": [
             {"title": entry.record.human_name, "matched": entry.decision.app_name} for entry in plan.uncertain
         ],
     }
+
+
+def _attempting(message: dict[str, Any], settings: Settings) -> dict[str, Any]:
+    """Mark one key in flight, immediately before Steam sees it.
+
+    If the browser, the service worker, or this process dies between here and
+    the verdict, the key lands in ATTEMPTED rather than staying pending. Steam
+    may well have accepted it, so a silent retry would spend a second
+    activation — and one of about ten failures an hour — on a game already
+    redeemed. A person decides instead.
+
+    Args:
+        message: Native message carrying ``id``.
+        settings: Runtime configuration.
+
+    Returns:
+        Confirmation that the key was marked.
+
+    Raises:
+        BridgeError: If no stored key has that id.
+    """
+    key_id = message.get("id")
+    if not isinstance(key_id, int):
+        raise BridgeError("Message carried no key id")
+
+    store = RedeemerStore(settings.database_path)
+    record = next((key for key in store.all_keys() if key.id == key_id), None)
+    if record is None:
+        raise BridgeError(f"No stored key with id {key_id}")
+
+    record.state = KeyState.ATTEMPTED
+    store.update_key(record)
+    return {"ok": True, "id": key_id, "state": record.state.value}
 
 
 def _record(message: dict[str, Any], settings: Settings) -> dict[str, Any]:
@@ -244,10 +297,7 @@ def _record(message: dict[str, Any], settings: Settings) -> dict[str, Any]:
         ALREADY_OWNED_CODES,
         RATE_LIMITED_CODE,
     )
-    from humble_steam_key_redeemer.core.models import (  # noqa: PLC0415
-        KeyState,
-        RedemptionAttempt,
-    )
+    from humble_steam_key_redeemer.core.models import RedemptionAttempt  # noqa: PLC0415
 
     result = message.get("result")
     if not isinstance(result, dict):
@@ -316,6 +366,19 @@ def _finish(message: dict[str, Any], settings: Settings) -> dict[str, Any]:
         raise BridgeError("Message carried no results")
 
     store = RedeemerStore(settings.database_path)
+
+    # A key marked in flight that never reached Steam must not stay ATTEMPTED:
+    # that state is terminal, and it means "Steam may have taken this". Nothing
+    # was spent, so the key goes back to being worth another run.
+    failures = message.get("failures")
+    failures = failures if isinstance(failures, list) else []
+    if failures:
+        failed_ids = {entry.get("id") for entry in failures if isinstance(entry, dict)}
+        for record in store.all_keys():
+            if record.id in failed_ids and record.state is KeyState.ATTEMPTED:
+                record.state = KeyState.REVEALED if record.redeemed_key_val else KeyState.UNREVEALED
+                store.update_key(record)
+
     codes: list[tuple[bool, Any]] = []
     for result in results:
         raw_body = result.get("result") if isinstance(result, dict) else None
@@ -324,8 +387,11 @@ def _finish(message: dict[str, Any], settings: Settings) -> dict[str, Any]:
 
     return {
         "ok": True,
+        # Steam verdicts only. A reveal Humble refused spent no activation, so
+        # counting it here would overstate what the run cost.
         "attempted": len(results),
         "redeemed": sum(1 for ok, _ in codes if ok),
+        "failed_before_steam": len(failures),
         "rate_limited": any(code == RATE_LIMITED_CODE for _, code in codes),
         "pending": len(store.pending_keys()),
     }
@@ -511,7 +577,11 @@ def _manifest_directory() -> Path:
     return home / ".config/google-chrome/NativeMessagingHosts"
 
 
-def install_manifest(extension_id: str, executable: str | None = None) -> Path:
+def install_manifest(
+    extension_id: str,
+    executable: str | None = None,
+    settings: Settings | None = None,
+) -> Path:
     """Register this tool as a native messaging host for the extension.
 
     Chrome will only start a native host that names the calling extension, so
@@ -521,6 +591,8 @@ def install_manifest(extension_id: str, executable: str | None = None) -> Path:
         extension_id: The extension's Chrome id.
         executable: Command Chrome should run; defaults to this interpreter
             invoking the bridge module.
+        settings: Configuration the launcher should pin, so a custom state
+            directory survives into the host Chrome starts.
 
     Returns:
         The manifest path written.
@@ -531,7 +603,7 @@ def install_manifest(extension_id: str, executable: str | None = None) -> Path:
     manifest = {
         "name": NATIVE_HOST_NAME,
         "description": "Humble Steam Key Redeemer native host",
-        "path": executable or _default_executable(),
+        "path": executable or _default_executable(settings),
         "type": "stdio",
         "allowed_origins": [f"chrome-extension://{extension_id}/"],
     }
@@ -541,17 +613,32 @@ def install_manifest(extension_id: str, executable: str | None = None) -> Path:
     return path
 
 
-def _default_executable() -> str:
+def _default_executable(settings: Settings | None = None) -> str:
     """Return a launcher script path, creating it when needed.
 
     Chrome executes the manifest's ``path`` directly with no arguments, so a
     bare interpreter will not do; a small shell wrapper is written instead.
+
+    The wrapper pins the state directory it was registered with. Chrome starts
+    the host with no arguments and none of the shell's environment, so a host
+    that rebuilt settings from defaults would read a different database than
+    the one the user chose — and report an empty library after a successful
+    import into the directory they asked for.
+
+    Args:
+        settings: Configuration to pin; defaults to the environment's.
+
+    Returns:
+        The launcher's path.
     """
-    settings = Settings()
+    settings = settings or Settings()
     settings.ensure_state_dir()
     launcher = settings.state_dir / "hskr-native-host"
     launcher.write_text(
-        f'#!/bin/sh\nexec "{sys.executable}" -m humble_steam_key_redeemer.bridge "$@"\n',
+        "#!/bin/sh\n"
+        f'HSKR_STATE_DIR="{settings.state_dir}"\n'
+        "export HSKR_STATE_DIR\n"
+        f'exec "{sys.executable}" -m humble_steam_key_redeemer.bridge "$@"\n',
         encoding="utf-8",
     )
     launcher.chmod(0o755)

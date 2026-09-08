@@ -161,10 +161,12 @@ async function readOwnedApps() {
       const userdata = await (
         await fetch("/dynamicstore/userdata/", { credentials: "include" })
       ).json();
-      const owned = new Set([
-        ...(userdata.rgOwnedApps ?? []),
-        ...(userdata.rgOwnedPackages ?? []),
-      ]);
+      // Applications only. Package ids are a separate namespace that happens
+      // to share the integer space, so folding them in here would mark an
+      // unowned application owned whenever its id collided with an owned
+      // package number — and a game wrongly marked owned has its key silently
+      // skipped.
+      const owned = new Set(userdata.rgOwnedApps ?? []);
       if (owned.size === 0) return { apps: {} };
 
       const list = await (
@@ -284,27 +286,48 @@ async function redeem({ reveal = false } = {}) {
   // memory: each verdict is persisted through `record` as it happens, and hskr
   // marks the key settled. A terminated run therefore loses at most the key in
   // flight, and a rerun will not re-attempt anything already decided.
+  //
+  // `results` holds Steam verdicts only. Anything that never reached Steam —
+  // a reveal Humble refused, a request that failed in transit — goes in
+  // `failures`, because counting those as attempts would overstate how much of
+  // the hourly activation budget the run actually spent.
   const results = [];
+  const failures = [];
+
   for (const entry of plan.attempts ?? []) {
     let key = entry.key;
 
     if (!key && reveal && entry.reveal) {
       const revealed = await revealKey(entry.reveal);
       if (revealed?.error || revealed?.status !== 200) {
-        results.push({ id: entry.id, revealed: false, detail: revealed?.error ?? "reveal failed" });
+        failures.push({ id: entry.id, detail: revealed?.error ?? "Humble refused the reveal" });
         continue;
       }
       key = revealed.body?.key;
       if (!key) {
-        results.push({ id: entry.id, revealed: false, detail: "Humble returned no key" });
+        failures.push({ id: entry.id, detail: "Humble returned no key" });
         continue;
       }
     }
     if (!key) continue;
 
+    // Mark it in flight before Steam sees it. If anything here dies mid
+    // activation, hskr surfaces the key rather than silently offering it up
+    // for a second activation on the next run.
+    await askHskr("attempting", { id: entry.id });
+
     const outcome = await redeemKey(key);
-    const detail = outcome?.body?.purchase_result_details ?? null;
-    results.push({ id: entry.id, key, status: outcome?.status, result: outcome?.body });
+
+    // A transport failure is not a verdict from Steam. Recording one as
+    // though it were would settle the key permanently, removing it from every
+    // future plan on the strength of an error Steam never sent.
+    if (outcome?.error || !outcome?.body) {
+      failures.push({ id: entry.id, detail: outcome?.error ?? "Steam sent no response" });
+      continue;
+    }
+
+    const detail = outcome.body.purchase_result_details ?? null;
+    results.push({ id: entry.id, key, status: outcome.status, result: outcome.body });
 
     // Report progress as it happens rather than only at the end.
     await askHskr("record", { result: results.at(-1) });
@@ -312,7 +335,7 @@ async function redeem({ reveal = false } = {}) {
     if (detail === STEAM_RATE_LIMITED) break;
   }
 
-  return askHskr("finish", { results });
+  return askHskr("finish", { results, failures });
 }
 
 // --------------------------------------------------------------- routing

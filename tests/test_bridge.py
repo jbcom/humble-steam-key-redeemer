@@ -296,3 +296,63 @@ class TestManifest:
 
         launcher = tmp_path / json.loads(path.read_text())["path"].split(str(tmp_path))[-1].lstrip("/")
         assert launcher.stat().st_mode & 0o111
+
+
+class TestPlanGuards:
+    """The browser path must not be the lenient one."""
+
+    def test_a_gift_link_never_reaches_the_browser(self, settings):
+        """Sending one spends one of about ten failed activations an hour."""
+        store = _seed(
+            settings,
+            _key("Celeste", 1, redeemed_key_val="https://www.humblebundle.com/gift?key=abc"),
+        )
+
+        reply = handle_message({"command": "plan", "owned": {}}, settings)
+
+        assert reply["attempts"] == []
+        assert store.all_keys()[0].state is KeyState.SKIPPED
+
+    def test_unrevealed_keys_are_counted_as_skipped(self, settings):
+        """Zero attempts and zero skipped would hide why nothing happened."""
+        _seed(settings, _key("Celeste", 1, redeemed_key_val=None, state=KeyState.UNREVEALED))
+
+        reply = handle_message({"command": "plan", "owned": {}}, settings)
+
+        assert reply["attempts"] == []
+        assert reply["skipped"] == 1
+        assert reply["unrevealed"] == 1
+
+
+class TestInFlight:
+    def test_a_key_is_marked_before_steam_sees_it(self, settings):
+        """A crash mid-activation must not offer the key up again."""
+        store = _seed(settings, _key("Celeste", 1))
+        key = store.all_keys()[0]
+
+        reply = handle_message({"command": "attempting", "id": key.id}, settings)
+
+        assert reply["state"] == KeyState.ATTEMPTED.value
+        assert store.all_keys()[0].state is KeyState.ATTEMPTED
+        # Terminal, so a rerun surfaces it rather than silently retrying.
+        assert store.pending_keys() == []
+
+    def test_a_key_that_never_reached_steam_stays_eligible(self, settings):
+        """Nothing was spent, so it is still worth attempting."""
+        store = _seed(settings, _key("Celeste", 1))
+        key = store.all_keys()[0]
+        handle_message({"command": "attempting", "id": key.id}, settings)
+
+        reply = handle_message(
+            {
+                "command": "finish",
+                "results": [],
+                "failures": [{"id": key.id, "detail": "no sessionid cookie"}],
+            },
+            settings,
+        )
+
+        assert reply["attempted"] == 0
+        assert reply["failed_before_steam"] == 1
+        assert store.all_keys()[0].state is KeyState.REVEALED
+        assert len(store.pending_keys()) == 1
