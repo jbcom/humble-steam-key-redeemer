@@ -7,6 +7,17 @@
 docs/build/
 .tox/
 
+# Agent session cache. Re-derivable, and the end-of-file-fixer hook rewrites
+# it on every run; only directive.md and decisions.ndjson are durable state.
+.agent-state/session-logs/
+.agent-state/session-state/
+.agent-state/digest.md
+.agent-state/cursor.md
+.agent-state/.indexed-sha
+.agent-state/.last-stop-sha
+.agent-state/.last-compaction
+.agent-state/batch.json
+
 # Session credentials. The current tool keeps these in a per-user state
 # directory, but a machine upgraded from the pre-1.0 script still has these
 # in the working directory, and they are bearer credentials.
