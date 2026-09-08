@@ -51,11 +51,22 @@ async function inPage(tabId, fn, args = []) {
 // ---------------------------------------------------------------- Humble
 
 async function humbleSignedIn() {
-  const response = await fetch(`${HUMBLE}/home/library`, {
-    credentials: "include",
-    redirect: "follow",
+  // Checked from inside the page rather than the service worker: a service
+  // worker fetch has no page origin, so it does not reliably carry the user's
+  // session and reports a false "signed out".
+  const tab = await tabFor(HUMBLE);
+  const result = await inPage(tab.id, async () => {
+    try {
+      const response = await fetch("/home/library", {
+        credentials: "include",
+        redirect: "follow",
+      });
+      return { signedIn: response.ok && !response.redirected };
+    } catch (error) {
+      return { error: String(error.message || error) };
+    }
   });
-  return response.ok && !response.redirected;
+  return Boolean(result?.signedIn);
 }
 
 /** Read every order, in batches, from inside the Humble page. */
@@ -126,11 +137,20 @@ async function revealKey({ machineName, gamekey, keyIndex }) {
 // ----------------------------------------------------------------- Steam
 
 async function steamSignedIn() {
-  const response = await fetch(`${STEAM}/account/registerkey`, {
-    credentials: "include",
-    redirect: "manual",
+  // Same reason as the Humble check: run it where the session lives.
+  const tab = await tabFor(STEAM);
+  const result = await inPage(tab.id, async () => {
+    try {
+      const response = await fetch("/account/registerkey", {
+        credentials: "include",
+        redirect: "manual",
+      });
+      return { signedIn: response.type === "opaqueredirect" ? false : response.ok };
+    } catch (error) {
+      return { error: String(error.message || error) };
+    }
   });
-  return response.type === "opaqueredirect" ? false : response.ok;
+  return Boolean(result?.signedIn);
 }
 
 /** Read the signed-in account's owned applications. */
@@ -232,6 +252,10 @@ async function redeem({ reveal = false } = {}) {
   const plan = await askHskr("plan", { owned: owned.apps, reveal });
   if (!plan?.ok) throw new Error(plan?.error ?? "hskr could not build a plan");
 
+  // A service worker can be terminated mid-run, so nothing is held only in
+  // memory: each verdict is persisted through `record` as it happens, and hskr
+  // marks the key settled. A terminated run therefore loses at most the key in
+  // flight, and a rerun will not re-attempt anything already decided.
   const results = [];
   for (const entry of plan.attempts ?? []) {
     let key = entry.key;
